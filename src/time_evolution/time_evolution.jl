@@ -1,9 +1,10 @@
-export OperatorSum, TimeDependentOperatorSum
+export TimeDependentOperatorSum
 export TimeEvolutionSol, TimeEvolutionMCSol
 
 export liouvillian, liouvillian_floquet, liouvillian_generalized
 
 const DEFAULT_ODE_SOLVER_OPTIONS = (abstol = 1e-8, reltol = 1e-6, save_everystep = false, save_end = true)
+const DEFAULT_SDE_SOLVER_OPTIONS = (abstol = 1e-2, reltol = 1e-2, save_everystep = false, save_end = true)
 
 @doc raw"""
     struct TimeEvolutionSol
@@ -95,6 +96,38 @@ function Base.show(io::IO, sol::TimeEvolutionMCSol)
     return nothing
 end
 
+struct TimeEvolutionSSESol{
+    TT<:Vector{<:Real},
+    TS<:AbstractVector,
+    TE<:Matrix{ComplexF64},
+    TEA<:Array{ComplexF64,3},
+    T1<:Real,
+    T2<:Real,
+}
+    n_traj::Int
+    times::TT
+    states::TS
+    expect::TE
+    expect_all::TEA
+    converged::Bool
+    alg::StochasticDiffEq.StochasticDiffEqAlgorithm
+    abstol::T1
+    reltol::T2
+end
+
+function Base.show(io::IO, sol::TimeEvolutionSSESol)
+    print(io, "Solution of quantum trajectories\n")
+    print(io, "(converged: $(sol.converged))\n")
+    print(io, "--------------------------------\n")
+    print(io, "num_trajectories = $(sol.n_traj)\n")
+    # print(io, "num_states = $(length(sol.states[1]))\n")
+    print(io, "num_expect = $(size(sol.expect, 1))\n")
+    print(io, "SDE alg.: $(sol.alg)\n")
+    print(io, "abstol = $(sol.abstol)\n")
+    print(io, "reltol = $(sol.reltol)\n")
+    return nothing
+end
+
 abstract type LindbladJumpCallbackType end
 
 struct ContinuousLindbladJumpCallback <: LindbladJumpCallbackType
@@ -105,49 +138,7 @@ struct DiscreteLindbladJumpCallback <: LindbladJumpCallbackType end
 
 ContinuousLindbladJumpCallback(; interp_points::Int = 10) = ContinuousLindbladJumpCallback(interp_points)
 
-## Sum of operators
-
-struct OperatorSum{CT<:Vector{<:Number},OT<:Vector{<:QuantumObject}} <: AbstractQuantumObject
-    coefficients::CT
-    operators::OT
-    function OperatorSum(coefficients::CT, operators::OT) where {CT<:Vector{<:Number},OT<:Vector{<:QuantumObject}}
-        length(coefficients) == length(operators) ||
-            throw(DimensionMismatch("The number of coefficients must be the same as the number of operators."))
-        # Check if all the operators have the same dimensions
-        dims = operators[1].dims
-        optype = operators[1].type
-        mapreduce(x -> x.dims == dims && x.type == optype, &, operators) ||
-            throw(DimensionMismatch("All the operators must have the same dimensions."))
-        T = promote_type(
-            mapreduce(x -> eltype(x.data), promote_type, operators),
-            mapreduce(eltype, promote_type, coefficients),
-        )
-        coefficients2 = T.(coefficients)
-        return new{Vector{T},OT}(coefficients2, operators)
-    end
-end
-
-Base.size(A::OperatorSum) = size(A.operators[1])
-Base.size(A::OperatorSum, inds...) = size(A.operators[1], inds...)
-Base.length(A::OperatorSum) = length(A.operators[1])
-Base.copy(A::OperatorSum) = OperatorSum(copy(A.coefficients), copy(A.operators))
-Base.deepcopy(A::OperatorSum) = OperatorSum(deepcopy(A.coefficients), deepcopy(A.operators))
-
-function update_coefficients!(A::OperatorSum, coefficients)
-    length(A.coefficients) == length(coefficients) ||
-        throw(DimensionMismatch("The number of coefficients must be the same as the number of operators."))
-    return A.coefficients .= coefficients
-end
-
-@inline function LinearAlgebra.mul!(y::AbstractVector{T}, A::OperatorSum, x::AbstractVector, α, β) where {T}
-    # Note that β is applied only to the first term
-    mul!(y, A.operators[1], x, α * A.coefficients[1], β)
-    @inbounds for i in 2:length(A.operators)
-        A.coefficients[i] == 0 && continue
-        mul!(y, A.operators[i], x, α * A.coefficients[i], 1)
-    end
-    return y
-end
+## Time-dependent sum of operators
 
 struct TimeDependentOperatorSum{CFT,OST<:OperatorSum}
     coefficient_functions::CFT

@@ -26,6 +26,7 @@ OperatorKet
 SuperOperatorQuantumObject
 SuperOperator
 QuantumObject
+OperatorSum
 size
 eltype
 length
@@ -178,11 +179,14 @@ sesolveProblem
 mesolveProblem
 lr_mesolveProblem
 mcsolveProblem
+ssesolveProblem
 mcsolveEnsembleProblem
+ssesolveEnsembleProblem
 sesolve
 mesolve
 lr_mesolve
 mcsolve
+ssesolve
 dfd_mesolve
 dsf_mesolve
 dsf_mcsolve

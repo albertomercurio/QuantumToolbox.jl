@@ -7,6 +7,7 @@ import Reexport: @reexport
 @reexport using LinearAlgebra
 @reexport using SparseArrays
 @reexport using OrdinaryDiffEq
+@reexport using StochasticDiffEq
 @reexport using LinearSolve
 
 # other functions in LinearAlgebra
@@ -24,6 +25,7 @@ end
 # other dependencies (in alphabetical order)
 import ArrayInterface: allowed_getindex, allowed_setindex!
 import DiffEqCallbacks: DiscreteCallback, PeriodicCallback, PresetTimeCallback, TerminateSteadyState
+import DiffEqNoiseProcess: RealWienerProcess, RealWienerProcess!
 import FFTW: fft, fftshift
 import Graphs: connected_components, DiGraph
 import IncompleteLU: ilu
@@ -52,6 +54,7 @@ include("qobj/states.jl")
 include("qobj/operators.jl")
 include("qobj/superoperators.jl")
 include("qobj/synonyms.jl")
+include("qobj/operator_sum.jl")
 
 # time evolution
 include("time_evolution/time_evolution.jl")
@@ -59,6 +62,7 @@ include("time_evolution/mesolve.jl")
 include("time_evolution/lr_mesolve.jl")
 include("time_evolution/sesolve.jl")
 include("time_evolution/mcsolve.jl")
+include("time_evolution/ssesolve.jl")
 include("time_evolution/time_evolution_dynamical.jl")
 
 # Others
