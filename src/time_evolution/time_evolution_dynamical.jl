@@ -618,7 +618,6 @@ function dsf_mcsolveEnsembleProblem(
     dsf_params::NamedTuple = NamedTuple();
     alg::OrdinaryDiffEqAlgorithm = Tsit5(),
     e_ops::Function = (op_list, p) -> Vector{TOl}([]),
-    H_t::Union{Nothing,Function,TimeDependentOperatorSum} = nothing,
     params::NamedTuple = NamedTuple(),
     ntraj::Int = 1,
     ensemble_method = EnsembleThreads(),
@@ -670,7 +669,6 @@ function dsf_mcsolveEnsembleProblem(
         c_ops₀;
         e_ops = e_ops₀,
         alg = alg,
-        H_t = H_t,
         params = params2,
         ntraj = ntraj,
         ensemble_method = ensemble_method,
@@ -690,7 +688,6 @@ end
         dsf_params::NamedTuple=NamedTuple();
         alg::OrdinaryDiffEqAlgorithm=Tsit5(),
         e_ops::Function=(op_list,p) -> Vector{TOl}([]),
-        H_t::Union{Nothing,Function,TimeDependentOperatorSum}=nothing,
         params::NamedTuple=NamedTuple(),
         δα_list::Vector{<:Real}=fill(0.2, length(op_list)),
         ntraj::Int=1,
@@ -716,7 +713,6 @@ function dsf_mcsolve(
     dsf_params::NamedTuple = NamedTuple();
     alg::OrdinaryDiffEqAlgorithm = Tsit5(),
     e_ops::Function = (op_list, p) -> Vector{TOl}([]),
-    H_t::Union{Nothing,Function,TimeDependentOperatorSum} = nothing,
     params::NamedTuple = NamedTuple(),
     δα_list::Vector{<:Real} = fill(0.2, length(op_list)),
     ntraj::Int = 1,
@@ -736,7 +732,6 @@ function dsf_mcsolve(
         dsf_params;
         alg = alg,
         e_ops = e_ops,
-        H_t = H_t,
         params = params,
         ntraj = ntraj,
         ensemble_method = ensemble_method,
@@ -747,5 +742,5 @@ function dsf_mcsolve(
         kwargs...,
     )
 
-    return mcsolve(ens_prob_mc; alg = alg, ntraj = ntraj, ensemble_method = ensemble_method)
+    return mcsolve(ens_prob_mc, t_l; alg = alg, ntraj = ntraj, ensemble_method = ensemble_method)
 end

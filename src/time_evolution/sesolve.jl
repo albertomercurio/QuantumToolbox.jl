@@ -77,7 +77,7 @@ Generates the ODEProblem for the Schrödinger time evolution of a quantum system
 - `prob`: The `ODEProblem` for the Schrödinger time evolution of the system.
 """
 function sesolveProblem(
-    H::Union{QuantumObject{DT1,OperatorQuantumObject},Tuple},
+    H::Union{AbstractQuantumObject{DT1,OperatorQuantumObject},Tuple},
     ψ0::QuantumObject{DT2,KetQuantumObject},
     tlist::AbstractVector;
     e_ops::Union{Nothing,AbstractVector,Tuple} = nothing,
@@ -169,7 +169,7 @@ Time evolution of a closed quantum system using the Schrödinger equation:
 - `sol::TimeEvolutionSol`: The solution of the time evolution. See also [`TimeEvolutionSol`](@ref)
 """
 function sesolve(
-    H::Union{QuantumObject{DT1,OperatorQuantumObject},Tuple},
+    H::Union{AbstractQuantumObject{DT1,OperatorQuantumObject},Tuple},
     ψ0::QuantumObject{DT2,KetQuantumObject},
     tlist::AbstractVector;
     alg::OrdinaryDiffEqAlgorithm = Tsit5(),
