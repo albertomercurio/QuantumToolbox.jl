@@ -21,14 +21,22 @@ A structure storing the results and some information from solving time evolution
 - `abstol::Real`: The absolute tolerance which is used during the solving process.
 - `reltol::Real`: The relative tolerance which is used during the solving process.
 """
-struct TimeEvolutionSol{TT<:Vector{<:Real},TS<:AbstractVector,TE<:Matrix{ComplexF64}}
+struct TimeEvolutionSol{
+    TT<:AbstractVector{<:Real},
+    TS<:AbstractVector,
+    TE<:Matrix,
+    RETT<:Enum,
+    AlgT<:OrdinaryDiffEqAlgorithm,
+    AT<:Real,
+    RT<:Real,
+}
     times::TT
     states::TS
     expect::TE
-    retcode::Enum
-    alg::OrdinaryDiffEqAlgorithm
-    abstol::Real
-    reltol::Real
+    retcode::RETT
+    alg::AlgT
+    abstol::AT
+    reltol::RT
 end
 
 function Base.show(io::IO, sol::TimeEvolutionSol)
