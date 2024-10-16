@@ -124,7 +124,7 @@ function sesolveProblem(
     kwargs3 = _generate_sesolve_kwargs(e_ops, makeVal(progress_bar), tlist, kwargs2)
 
     tspan = (tlist[1], tlist[end])
-    return ODEProblem{true,FullSpecialize}(U, ψ0, tspan, p; kwargs3...)
+    return ODEProblem{true}(U, ψ0, tspan, p; kwargs3...)
 end
 
 @doc raw"""

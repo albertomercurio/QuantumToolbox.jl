@@ -117,6 +117,11 @@ function _mcsolve_generate_statistics(sol, i, states, expvals_all, jump_times, j
     return jump_which[i] = sol_i.prob.p.jump_which
 end
 
+_mcsolve_make_Heff_QobjEvo(H::QuantumObject, c_ops) = QobjEvo(H - 1im * mapreduce(op -> op' * op, +, c_ops) / 2)
+_mcsolve_make_Heff_QobjEvo(H::Tuple, c_ops) = QobjEvo((H..., -1im * mapreduce(op -> op' * op, +, c_ops) / 2))
+_mcsolve_make_Heff_QobjEvo(H::QuantumObjectEvolution, c_ops) =
+    H + QobjEvo(mapreduce(op -> op' * op, +, c_ops), -1im / 2)
+
 @doc raw"""
     mcsolveProblem(H::QuantumObject{<:AbstractArray{T1},OperatorQuantumObject},
         ψ0::QuantumObject{<:AbstractArray{T2},KetQuantumObject},
@@ -210,7 +215,7 @@ function mcsolveProblem(
 
     tlist = convert(Vector{_FType(ψ0)}, tlist) # Convert it to support GPUs and avoid type instabilities for OrdinaryDiffEq.jl
 
-    H_eff_evo = QobjEvo(H) + QobjEvo(mapreduce(op -> op' * op, +, c_ops) / 2, -1im)
+    H_eff_evo = _mcsolve_make_Heff_QobjEvo(H, c_ops)
 
     if e_ops isa Nothing
         expvals = Array{ComplexF64}(undef, 0, length(tlist))

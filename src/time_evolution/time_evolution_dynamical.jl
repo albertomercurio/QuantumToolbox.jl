@@ -572,8 +572,10 @@ function _DSF_mcsolve_Affect!(integrator)
     c_ops2 = c_ops(op_l2, dsf_params)
     @. e_ops0 = get_data(e_ops2)
     @. c_ops0 = get_data(c_ops2)
-    H_eff = H(op_l2, dsf_params).data - lmul!(convert(eltype(ψt), 0.5im), mapreduce(op -> op' * op, +, c_ops0))
-    return mul!(internal_params.U, -1im, H_eff)
+    H_nh = lmul!(convert(eltype(ψt), 0.5im), mapreduce(op -> op' * op, +, c_ops0))
+    # By doing this, we are assuming that the system is time-independent and f is a ScaledOperator
+    copyto!(integrator.f.f.L.A, H(op_l2, dsf_params).data - H_nh)
+    return u_modified!(integrator, true)
 end
 
 function _dsf_mcsolve_prob_func(prob, i, repeat)
@@ -582,7 +584,6 @@ function _dsf_mcsolve_prob_func(prob, i, repeat)
     prm = merge(
         internal_params,
         (
-            U = copy(internal_params.U),
             e_ops_mc = copy(internal_params.e_ops_mc),
             c_ops = copy(internal_params.c_ops),
             expvals = similar(internal_params.expvals),
@@ -605,7 +606,9 @@ function _dsf_mcsolve_prob_func(prob, i, repeat)
         ),
     )
 
-    return remake(prob, p = prm)
+    f = deepcopy(prob.f.f)
+
+    return remake(prob, f = f, p = prm)
 end
 
 function dsf_mcsolveEnsembleProblem(
