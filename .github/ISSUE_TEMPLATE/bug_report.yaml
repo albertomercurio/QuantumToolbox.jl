@@ -16,13 +16,13 @@ body:
       label: Code to Reproduce the Bug
       description: Please provide a minimal working example. Paste your code directly (It will be automatically formatted, so there's no need for backticks)
       placeholder: "using QuantumToolbox\nprint(qeye(2))"
-      render: shell
+      render: julia
   - type: textarea
     id: bug-output
     attributes:
       label: Code Output
       description: Please paste the relevant output here (automatically formatted)
-      placeholder: "Quantum Object:   type=Operator   dims=[2]   size=(2, 2)   ishermitian=true\n2×2 Diagonal{ComplexF64, Vector{ComplexF64}}:\n 1.0+0.0im      ⋅    \n     ⋅      1.0+0.0im"
+      placeholder: "Quantum Object:   type=Operator()   dims=[2]   size=(2, 2)   ishermitian=true\n2×2 Diagonal{ComplexF64, Vector{ComplexF64}}:\n 1.0+0.0im      ⋅    \n     ⋅      1.0+0.0im"
       render: shell
   - type: textarea
     id: expected-behaviour
@@ -37,7 +37,7 @@ body:
     attributes:
       label: Your Environment
       description: Please use `QuantumToolbox.about()` or `QuantumToolbox.versioninfo()` to get the information about your environment and paste it here (automatically formatted)
-      placeholder: "Julia              Ver. ***\nQuantumToolbox     Ver. ***\nLinearSolve        Ver. ***\nOrdinaryDiffEqCore Ver. ***\nOS       : ***\nWORD_SIZE: ***\nLIBM     : ***\nLLVM     : ***\nBLAS     : ***"
+      placeholder: "Julia              Ver. ***\nQuantumToolbox     Ver. ***\nSciMLOperators     Ver. ***\nLinearSolve        Ver. ***\nOrdinaryDiffEqCore Ver. ***\nOS       : ***\nWORD_SIZE: ***\nLIBM     : ***\nLLVM     : ***\nBLAS     : ***"
       render: shell
     validations:
       required: true
