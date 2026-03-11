@@ -1,88 +1,90 @@
-export lr_mesolve, lr_mesolveProblem, LRTimeEvolutionSol, LRMesolveOptions
+export lr_mesolve, lr_mesolveProblem, TimeEvolutionLRSol
 
-#=======================================================#
-#                   STRUCT DEFINITIONS
-#=======================================================#
+@doc raw"""
+    struct TimeEvolutionLRSol
 
-struct LRTimeEvolutionSol{TT<:Vector{<:Real},TS<:AbstractVector,TE<:Matrix{ComplexF64},TM<:Vector{<:Integer}}
-    times::TT
-    z::TS
-    B::TS
-    expvals::TE
-    funvals::TE
+A structure storing the results and some information from solving low-rank master equation time evolution.
+
+# Fields (Attributes)
+
+- `times::AbstractVector`: The list of time points at which the expectation values are calculated during the evolution.
+- `times_states::AbstractVector`: The list of time points at which the states are stored during the evolution.
+- `states::Vector{QuantumObject}`: The list of result states corresponding to each time point in `times_states`.
+- `expect::Matrix`: The expectation values corresponding to each time point in `times`.
+- `fexpect::Matrix`: The function values corresponding to each time point in `times`.
+- `retcode`: The return code from the solver.
+- `alg`: The algorithm which is used during the solving process.
+- `abstol::Real`: The absolute tolerance which is used during the solving process.
+- `reltol::Real`: The relative tolerance which is used during the solving process.
+- `z::Vector{QuantumObject}`: The `z`` matrix of the low-rank algorithm at each time point.
+- `B::Vector{QuantumObject}`: The `B` matrix of the low-rank algorithm at each time point.
+"""
+struct TimeEvolutionLRSol{
+        TT1 <: AbstractVector{<:Real},
+        TT2 <: AbstractVector{<:Real},
+        TS <: AbstractVector,
+        TE <: Matrix{ComplexF64},
+        RetT <: Enum,
+        AlgT <: AbstractODEAlgorithm,
+        TolT <: Real,
+        TSZB <: AbstractVector,
+        TM <: Vector{<:Integer},
+    }
+    times::TT1
+    times_states::TT2
+    states::TS
+    expect::TE
+    fexpect::TE
+    retcode::RetT
+    alg::AlgT
+    abstol::TolT
+    reltol::TolT
+    z::TSZB
+    B::TSZB
     M::TM
 end
 
-struct LRMesolveOptions{AlgType<:OrdinaryDiffEqAlgorithm}
-    alg::AlgType
-    progress::Bool
-    err_max::Real
-    p0::Real
-    atol_inv::Real
-    M_max::Integer
-    compute_Si::Bool
-    is_dynamical::Bool
-    adj_condition::String
-    Δt::Real
-end
-
-function LRMesolveOptions(;
-    alg::OrdinaryDiffEqAlgorithm = Tsit5(),
-    progress::Bool = true,
-    err_max::Real = 0.0,
-    p0::Real = 0.0,
-    atol_inv::Real = 1e-4,
-    M_max::Integer = typemax(Int),
-    compute_Si::Bool = true,
-    _is_dynamical::Bool = err_max > 0,
-    adj_condition::String = "variational",
-    Δt::Real = 0.0,
+lr_mesolve_options_default = (
+    alg = DP5(),
+    progress = true,
+    err_max = 0.0,
+    p0 = 0.0,
+    atol_inv = 1.0e-4,
+    M_max = typemax(Int),
+    compute_Si = true,
+    is_dynamical = false,
+    adj_condition = "variational",
+    Δt = 0.0,
 )
-    return LRMesolveOptions{typeof(alg)}(
-        alg,
-        progress,
-        err_max,
-        p0,
-        atol_inv,
-        M_max,
-        compute_Si,
-        _is_dynamical,
-        adj_condition,
-        Δt,
-    )
-end
 
-#=======================================================#
-#                  ADDITIONAL FUNCTIONS
-#=======================================================#
+#=
+                   ADDITIONAL FUNCTIONS
+=#
 
 select(x::Real, xarr::AbstractArray, retval = false) = retval ? xarr[argmin(abs.(x .- xarr))] : argmin(abs.(x .- xarr))
 
-@doc raw"""
-    _pinv!(A, T1, T2; atol::Real=0.0, rtol::Real=(eps(real(float(oneunit(T))))*min(size(A)...))*iszero(atol)) where T
-    Computes the pseudo-inverse of a matrix A, and stores it in T1. If T2 is provided, it is used as a temporary matrix. 
-    The algorithm is based on the SVD decomposition of A, and is taken from the Julia package LinearAlgebra.
-    The difference with respect to the original function is that the cutoff is done with a smooth function instead of a step function.
+#=
+    _pinv_smooth!(A, T1, T2; atol::Real=0.0, rtol::Real=(eps(real(float(oneunit(T))))*min(size(A)...))*iszero(atol)) where T
 
-    Parameters
-    ----------
-    A : AbstractMatrix{T}
-        The matrix to be inverted.
-    T1 : AbstractMatrix{T}
-    T2 : AbstractMatrix{T}
-        Temporary matrices used in the calculation.
-    atol : Real
-        Absolute tolerance for the calculation of the pseudo-inverse.   
-    rtol : Real
-        Relative tolerance for the calculation of the pseudo-inverse.
-"""
-function _pinv!(
-    A::AbstractMatrix{T},
-    T1::AbstractMatrix{T},
-    T2::AbstractMatrix{T};
-    atol::Real = 0.0,
-    rtol::Real = (eps(real(float(oneunit(T)))) * min(size(A)...)) * iszero(atol),
-) where {T}
+Computes the pseudo-inverse of a matrix A, and stores it in T1. If T2 is provided, it is used as a temporary matrix.
+The algorithm is based on the SVD decomposition of A, and is taken from the Julia package LinearAlgebra.
+The difference with respect to the original function is that the cutoff is done with a smooth function instead of a step function.
+
+# Arguments
+
+  - `A::AbstractMatrix`: The matrix to be inverted.
+  - `T1::AbstractMatrix`: The matrix where the pseudo-inverse is stored.
+  - `T2::AbstractMatrix`: A temporary matrix.
+  - `atol::Real`: The absolute tolerance.
+  - `rtol::Real`: The relative tolerance.
+=#
+function _pinv_smooth!(
+        A::AbstractMatrix{T},
+        T1::AbstractMatrix{T},
+        T2::AbstractMatrix{T};
+        atol::Real = 0.0,
+        rtol::Real = (eps(real(float(oneunit(T)))) * min(size(A)...)) * iszero(atol),
+    ) where {T}
     if isdiag(A)
         idxA = diagind(A)
         diagA = view(A, idxA)
@@ -98,22 +100,19 @@ function _pinv!(
     return mul!(T1, SVD.Vt', T2)
 end
 
-@doc raw"""
-    _calculate_expectation!(p,z,B,idx) where T
-    Calculates the expectation values and function values of the operators and functions in p.e_ops and p.f_ops, respectively, and stores them in p.expvals and p.funvals.
-    The function is called by the callback _save_affect_lr_mesolve!.
+#=
+    _calculate_expectation!(p,z,B,idx)
 
-    Parameters
-    ----------
-    p : NamedTuple
-        The parameters of the problem.
-    z : AbstractMatrix{T}
-        The z matrix.
-    B : AbstractMatrix{T}
-        The B matrix.
-    idx : Integer
-        The index of the current time step.
-"""
+Calculates the expectation values and function values of the operators and functions in p.e_ops and p.f_ops, respectively, and stores them in p.expvals and p.funvals.
+The function is called by the callback _save_affect_lr_mesolve!.
+
+# Arguments
+
+  - `p::NamedTuple`: The parameters of the problem.
+  - `z::AbstractMatrix`: The z matrix of the low-rank algorithm.
+  - `B::AbstractMatrix`: The B matrix of the low-rank algorithm.
+  - `idx::Integer`: The index of the current time step.
+=#
 function _calculate_expectation!(p, z, B, idx)
     e_ops = p.e_ops
     f_ops = p.f_ops
@@ -131,14 +130,14 @@ function _calculate_expectation!(p, z, B, idx)
     end
 
     #Function values
-    @inbounds for (i, f) in enumerate(f_ops)
+    return @inbounds for (i, f) in enumerate(f_ops)
         funvals[i, idx] = f(p, z, B)
     end
 end
 
-#=======================================================#
-#                   SAVING FUNCTIONS
-#=======================================================#
+#=
+                    SAVING FUNCTIONS
+=#
 
 function _periodicsave_func(integrator)
     ip = integrator.p
@@ -147,42 +146,40 @@ function _periodicsave_func(integrator)
     return u_modified!(integrator, false)
 end
 
-_save_control_lr_mesolve(u, t, integrator) = t in integrator.p.t_l
+_save_control_lr_mesolve(u, t, integrator) = t in integrator.p.times
 
 function _save_affect_lr_mesolve!(integrator)
     ip = integrator.p
     N, M = ip.N, ip.M
-    idx = select(integrator.t, ip.t_l)
+    idx = select(integrator.t, ip.times)
 
-    @views z = reshape(integrator.u[1:N*M], N, M)
-    @views B = reshape(integrator.u[N*M+1:end], M, M)
+    @views z = reshape(integrator.u[1:(N * M)], N, M)
+    @views B = reshape(integrator.u[(N * M + 1):end], M, M)
     _calculate_expectation!(ip, z, B, idx)
 
     if integrator.p.opt.progress
-        print("\rProgress: $(round(Int, 100*idx/length(ip.t_l)))%")
+        print("\rProgress: $(round(Int, 100 * idx / length(ip.times)))%")
         flush(stdout)
     end
     return u_modified!(integrator, false)
 end
 
-#=======================================================#
-#                CALLBACK FUNCTIONS
-#=======================================================#
+#=
+                 CALLBACK FUNCTIONS
+=#
 
-@doc raw"""
-    _adjM_condition_ratio(u, t, integrator) where T
-    Condition for the dynamical rank adjustment based on the ratio between the smallest and largest eigenvalues of the density matrix.
-    The spectrum of the density matrix is calculated efficiently using the properties of the SVD decomposition of the matrix.
+#=
+    _adjM_condition_ratio(u, t, integrator)
 
-    Parameters
-    ----------
-    u : AbstractVector{T}
-        The current state of the system.
-    t : Real
-        The current time.
-    integrator : ODEIntegrator
-        The integrator of the problem.
-"""
+Condition for the dynamical rank adjustment based on the ratio between the smallest and largest eigenvalues of the density matrix.
+The spectrum of the density matrix is calculated efficiently using the properties of the SVD decomposition of the matrix.
+
+# Arguments
+
+  - `u::AbstractVector`: The current state of the system.
+  - `t::Real`: The current time.
+  - `integrator::ODEIntegrator`: The integrator of the problem.
+=#
 function _adjM_condition_ratio(u, t, integrator)
     ip = integrator.p
     opt = ip.opt
@@ -190,8 +187,8 @@ function _adjM_condition_ratio(u, t, integrator)
 
     C = ip.A0
     σ = ip.temp_MM
-    @views z = reshape(u[1:N*M], N, M)
-    @views B = reshape(u[N*M+1:end], M, M)
+    @views z = reshape(u[1:(N * M)], N, M)
+    @views B = reshape(u[(N * M + 1):end], M, M)
     mul!(C, z, sqrt(B))
     mul!(σ, C', C)
     p = abs.(eigvals(σ))
@@ -200,19 +197,17 @@ function _adjM_condition_ratio(u, t, integrator)
     return (err >= opt.err_max && M < N && M < opt.M_max)
 end
 
-@doc raw"""
-    _adjM_condition_variational(u, t, integrator) where T
-    Condition for the dynamical rank adjustment based on the leakage out of the low-rank manifold.
+#=
+    _adjM_condition_variational(u, t, integrator)
 
-    Parameters
-    ----------
-    u : AbstractVector{T}
-        The current state of the system.
-    t : Real
-        The current time.
-    integrator : ODEIntegrator
-        The integrator of the problem.
-"""
+Condition for the dynamical rank adjustment based on the leakage out of the low-rank manifold.
+
+# Arguments
+
+  - `u::AbstractVector`: The current state of the system.
+  - `t::Real`: The current time.
+  - `integrator::ODEIntegrator`: The integrator of the problem.
+=#
 function _adjM_condition_variational(u, t, integrator)
     ip = integrator.p
     opt = ip.opt
@@ -222,16 +217,16 @@ function _adjM_condition_variational(u, t, integrator)
     return (err >= opt.err_max && M < N && M < opt.M_max)
 end
 
-@doc raw"""
+#=
     _adjM_affect!(integrator)
-    Affect function for the dynamical rank adjustment. It increases the rank of the low-rank manifold by one, and updates the matrices accordingly.
-    If Δt>0, it rewinds the integrator to the previous time step.
 
-    Parameters
-    ----------
-    integrator : ODEIntegrator
-        The integrator of the problem.
-"""
+Affect function for the dynamical rank adjustment. It increases the rank of the low-rank manifold by one, and updates the matrices accordingly.
+If Δt>0, it rewinds the integrator to the previous time step.
+
+# Arguments
+
+  - `integrator::ODEIntegrator`: The integrator of the problem.
+=#
 function _adjM_affect!(integrator)
     ip = integrator.p
     opt = ip.opt
@@ -239,8 +234,8 @@ function _adjM_affect!(integrator)
     N, M = ip.N, ip.M
 
     @views begin
-        z = Δt > 0 ? reshape(ip.u_save[1:N*M], N, M) : reshape(integrator.u[1:N*M], N, M)
-        B = Δt > 0 ? reshape(ip.u_save[N*M+1:end], M, M) : reshape(integrator.u[N*M+1:end], M, M)
+        z = Δt > 0 ? reshape(ip.u_save[1:(N * M)], N, M) : reshape(integrator.u[1:(N * M)], N, M)
+        B = Δt > 0 ? reshape(ip.u_save[(N * M + 1):end], M, M) : reshape(integrator.u[(N * M + 1):end], M, M)
         ψ = ip.L_tilde[:, 1]
         normalize!(ψ)
 
@@ -248,7 +243,7 @@ function _adjM_affect!(integrator)
         B = cat(B, opt.p0, dims = (1, 2))
         resize!(integrator, length(z) + length(B))
         integrator.u[1:length(z)] .= z[:]
-        integrator.u[length(z)+1:end] .= B[:]
+        integrator.u[(length(z) + 1):end] .= B[:]
     end
 
     integrator.p = merge(
@@ -265,10 +260,12 @@ function _adjM_affect!(integrator)
         ),
     )
     mul!(integrator.p.S, z', z)
-    !(opt.compute_Si) &&
-        (integrator.p.Si .= _pinv!(Hermitian(integrator.p.S), integrator.temp_MM, integrator.L, atol = opt.atol_inv))
+    !(opt.compute_Si) && (
+        integrator.p.Si .=
+            _pinv_smooth!(Hermitian(integrator.p.S), integrator.temp_MM, integrator.L, atol = opt.atol_inv)
+    )
 
-    if Δt > 0
+    return if Δt > 0
         integrator.p = merge(integrator.p, (u_save = copy(integrator.u),))
         t0 = ip.scalars[2]
         reinit!(integrator, integrator.u; t0 = t0, erase_sol = false)
@@ -282,25 +279,22 @@ function _adjM_affect!(integrator)
     end
 end
 
-#=======================================================#
-#            DYNAMICAL EVOLUTION EQUATIONS
-#=======================================================#
+#=
+             DYNAMICAL EVOLUTION EQUATIONS
+=#
 
-@doc raw"""
-    dBdz!(du, u, p, t) where T
-    Dynamical evolution equations for the low-rank manifold. The function is called by the ODEProblem.
+#=
+    dBdz!(du, u, p, t)
 
-    Parameters
-    ----------
-    du : AbstractVector{T}
-        The derivative of the state of the system.
-    u : AbstractVector{T}
-        The current state of the system.
-    p : NamedTuple
-        The parameters of the problem.
-    t : Real
-        The current time.
-"""
+Dynamical evolution equations for the low-rank manifold. The function is called by the ODEProblem.
+
+# Arguments
+
+  - `du::AbstractVector`: The derivative of the state vector.
+  - `u::AbstractVector`: The state vector.
+  - `p::NamedTuple`: The parameters of the problem.
+  - `t::Real`: The current time.
+=#
 function dBdz!(du, u, p, t)
     #NxN
     H, Γ = p.H, p.Γ
@@ -313,10 +307,10 @@ function dBdz!(du, u, p, t)
     N, M = p.N, p.M
     opt = p.opt
 
-    @views z = reshape(u[1:N*M], N, M)
-    @views dz = reshape(du[1:N*M], N, M)
-    @views B = reshape(u[N*M+1:end], M, M)
-    @views dB = reshape(du[N*M+1:end], M, M)
+    @views z = reshape(u[1:(N * M)], N, M)
+    @views dz = reshape(du[1:(N * M)], N, M)
+    @views B = reshape(u[(N * M + 1):end], M, M)
+    @views dB = reshape(du[(N * M + 1):end], M, M)
 
     #Assign A0 and S
     mul!(S, z', z)
@@ -326,18 +320,18 @@ function dBdz!(du, u, p, t)
     mul!(A0, z, B)
 
     # Calculate inverse
-    opt.compute_Si && (Si .= _pinv!(Hermitian(S), temp_MM, L, atol = opt.atol_inv))
-    Bi .= _pinv!(Hermitian(B), temp_MM, L, atol = opt.atol_inv)
+    opt.compute_Si && (Si .= _pinv_smooth!(Hermitian(S), temp_MM, L, atol = opt.atol_inv))
+    Bi .= _pinv_smooth!(Hermitian(B), temp_MM, L, atol = opt.atol_inv)
 
     # Calculate the effective Hamiltonian part of L_tilde
-    mul!(dz, H, A0)
+    H(dz, A0, nothing, p.params, t)
     mul!(L_tilde, dz, S)
     mul!(L, dz', z)
     mul!(L_tilde, z, L, +1im, -1im)
 
     # Calculate the jump operators part of L_tilde
     @inbounds for Γi in Γ
-        mul!(dz, Γi, z)
+        Γi(dz, z, nothing, p.params, t)
         mul!(L, dz', z)
         mul!(temp_MM, B, L)
         mul!(L_tilde, dz, temp_MM, 1, 1)
@@ -360,57 +354,77 @@ function dBdz!(du, u, p, t)
     return dB .-= temp_MM
 end
 
-#=======================================================#
-#                   PROBLEM FORMULATION
-#=======================================================#
+#=
+                  OUTPUT GENNERATION
+=#
+
+get_z(u::AbstractArray{T}, N::Integer, M::Integer) where {T} = reshape(view(u, 1:(M * N)), N, M)
+
+get_B(u::AbstractArray{T}, N::Integer, M::Integer) where {T} = reshape(view(u, (M * N + 1):length(u)), M, M)
+
+#=
+                    PROBLEM FORMULATION
+=#
 
 @doc raw"""
-    lr_mesolveProblem(H, z, B, t_l, c_ops; e_ops=(), f_ops=(), opt=LRMesolveOptions(), kwargs...) where T
-    Formulates the ODEproblem for the low-rank time evolution of the system. The function is called by lr_mesolve.
+    lr_mesolveProblem(
+        H::Union{AbstractQuantumObject{Operator}, Tuple},
+        z::AbstractArray{T,2},
+        B::AbstractArray{T,2},
+        tlist::AbstractVector,
+        c_ops::Union{AbstractVector,Tuple}=();
+        e_ops::Union{AbstractVector,Tuple}=(),
+        f_ops::Union{AbstractVector,Tuple}=(),
+        opt::NamedTuple = lr_mesolve_options_default,
+        kwargs...,
+    )
 
-    Parameters
-    ----------
-    H : QuantumObject
-        The Hamiltonian of the system.
-    z : AbstractMatrix{T}
-        The initial z matrix.
-    B : AbstractMatrix{T}
-        The initial B matrix.
-    t_l : AbstractVector{T}
-        The time steps at which the expectation values and function values are calculated.
-    c_ops : AbstractVector{QuantumObject}
-        The jump operators of the system.
-    e_ops : Tuple{QuantumObject}
-        The operators whose expectation values are calculated.
-    f_ops : Tuple{Function}
-        The functions whose values are calculated.
-    opt : LRMesolveOptions
-        The options of the problem.
-    kwargs : NamedTuple
-        Additional keyword arguments for the ODEProblem.
+Formulates the ODEproblem for the low-rank time evolution of the system. The function is called by [`lr_mesolve`](@ref). For more information about the low-rank master equation, see [gravina2024adaptive](@cite).
+
+# Arguments
+- `H::Union{AbstractQuantumObject{Operator}, Tuple}`: The Hamiltonian of the system. Time dependent Hamiltonians can be provided as in [`mesolve`](@ref).
+- `z::AbstractArray`: The initial z matrix of the low-rank algorithm.
+- `B::AbstractArray`: The initial B matrix of the low-rank algorithm.
+- `tlist::AbstractVector`: The time steps at which the expectation values and function values are calculated.
+- `c_ops::Union{AbstractVector,Tuple}`: The list of the collapse operators.
+- `e_ops::Union{AbstractVector,Tuple}`: The list of the operators for which the expectation values are calculated.
+- `f_ops::Union{AbstractVector,Tuple}`: The list of the functions for which the function values are calculated.
+- `opt::NamedTuple`: The options of the low-rank master equation.
+- `kwargs`: Additional keyword arguments.
 """
 function lr_mesolveProblem(
-    H::QuantumObject{<:AbstractArray{T1},OperatorQuantumObject},
-    z::AbstractArray{T2,2},
-    B::AbstractArray{T2,2},
-    t_l::AbstractVector,
-    c_ops::AbstractVector = [];
-    e_ops::Tuple = (),
-    f_ops::Tuple = (),
-    opt::LRMesolveOptions{AlgType} = LRMesolveOptions(),
-    kwargs...,
-) where {T1,T2,AlgType<:OrdinaryDiffEqAlgorithm}
+        H::Union{AbstractQuantumObject{Operator}, Tuple},
+        z::AbstractArray{T, 2},
+        B::AbstractArray{T, 2},
+        tlist::AbstractVector,
+        c_ops::Union{AbstractVector, Tuple} = ();
+        e_ops::Union{AbstractVector, Tuple} = (),
+        f_ops::Union{AbstractVector, Tuple} = (),
+        opt::NamedTuple = lr_mesolve_options_default,
+        params = nothing,
+        kwargs...,
+    ) where {T}
 
     # Formulation of problem
-    H -= 0.5im * sum([Γ' * Γ for Γ in c_ops])
-    H = get_data(H)
-    c_ops = get_data.(c_ops)
+    H_eff_evo = _mcsolve_make_Heff_QobjEvo(H, c_ops)
+    H = cache_operator(get_data(H_eff_evo), z)
+    c_ops = get_data.(cache_operator.(QuantumObjectEvolution.(c_ops), Ref(z)))
+
+    Hdims = H_eff_evo.dimensions
+
     e_ops = get_data.(e_ops)
+
+    t_l = _check_tlist(tlist, _float_type(H))
 
     # Initialization of Arrays
     expvals = Array{ComplexF64}(undef, length(e_ops), length(t_l))
     funvals = Array{ComplexF64}(undef, length(f_ops), length(t_l))
     Ml = Array{Int64}(undef, length(t_l))
+
+    opt = merge(lr_mesolve_options_default, opt)
+    if opt.err_max > 0
+        opt = merge(opt, (is_dynamical = true,))
+    end
 
     # Initialization of parameters. Scalars represents in order: Tr(S^{-1}L), t0
     p = (
@@ -421,7 +435,7 @@ function lr_mesolveProblem(
         e_ops = e_ops,
         f_ops = f_ops,
         opt = opt,
-        t_l = t_l,
+        times = t_l,
         expvals = expvals,
         funvals = funvals,
         Ml = Ml,
@@ -434,13 +448,15 @@ function lr_mesolveProblem(
         Si = similar(B),
         u_save = vcat(vec(z), vec(B)),
         scalars = [0.0, t_l[1]],
+        Hdims = Hdims,
+        params = params,
     )
 
     mul!(p.S, z', z)
     p.Si .= pinv(Hermitian(p.S), atol = opt.atol_inv)
 
     # Initialization of ODEProblem's kwargs
-    default_values = (DEFAULT_ODE_SOLVER_OPTIONS..., saveat = [t_l[end]])
+    default_values = (default_ode_solver_options(T)..., saveat = [t_l[end]])
     kwargs2 = merge(default_values, kwargs)
 
     # Initialization of Callbacks
@@ -450,7 +466,7 @@ function lr_mesolveProblem(
         kwargs2 = merge(
             kwargs2,
             haskey(kwargs2, :callback) ? Dict(:callback => CallbackSet(cb_save, kwargs2[:callback])) :
-            Dict(:callback => cb_save),
+                Dict(:callback => cb_save),
         )
     end
 
@@ -461,7 +477,7 @@ function lr_mesolveProblem(
             kwargs2 = merge(
                 kwargs2,
                 haskey(kwargs2, :callback) ? Dict(:callback => CallbackSet(cb_periodicsave, kwargs2[:callback])) :
-                Dict(:callback => cb_periodicsave),
+                    Dict(:callback => cb_periodicsave),
             )
         end
 
@@ -476,64 +492,80 @@ function lr_mesolveProblem(
         kwargs2 = merge(
             kwargs2,
             haskey(kwargs2, :callback) ? Dict(:callback => CallbackSet(cb_adjM, kwargs2[:callback])) :
-            Dict(:callback => cb_adjM),
+                Dict(:callback => cb_adjM),
         )
     end
 
     # Initialization of ODEProblem
     tspan = (t_l[1], t_l[end])
-    return ODEProblem(dBdz!, p.u_save, tspan, p; kwargs2...)
+    return ODEProblem{true}(dBdz!, p.u_save, tspan, p; kwargs2...)
 end
 
+@doc raw"""
+    lr_mesolve(
+        H::QuantumObject{Operator},
+        z::AbstractArray{T,2},
+        B::AbstractArray{T,2},
+        tlist::AbstractVector,
+        c_ops::Union{AbstractVector,Tuple}=();
+        e_ops::Union{AbstractVector,Tuple}=(),
+        f_ops::Union{AbstractVector,Tuple}=(),
+        opt::NamedTuple = lr_mesolve_options_default,
+        kwargs...,
+    )
+
+Time evolution of an open quantum system using the low-rank master equation. For more information about the low-rank master equation, see [gravina2024adaptive](@cite).
+
+# Arguments
+- `H::QuantumObject`: The Hamiltonian of the system.
+- `z::AbstractArray`: The initial z matrix of the low-rank algorithm.
+- `B::AbstractArray`: The initial B matrix of the low-rank algorithm.
+- `tlist::AbstractVector`: The time steps at which the expectation values and function values are calculated.
+- `c_ops::Union{AbstractVector,Tuple}`: The list of the collapse operators.
+- `e_ops::Union{AbstractVector,Tuple}`: The list of the operators for which the expectation values are calculated.
+- `f_ops::Union{AbstractVector,Tuple}`: The list of the functions for which the function values are calculated.
+- `opt::NamedTuple`: The options of the low-rank master equation.
+- `kwargs`: Additional keyword arguments.
+"""
 function lr_mesolve(
-    H::QuantumObject{<:AbstractArray{T1},OperatorQuantumObject},
-    z::AbstractArray{T2,2},
-    B::AbstractArray{T2,2},
-    t_l::AbstractVector,
-    c_ops::AbstractVector = [];
-    e_ops::Tuple = (),
-    f_ops::Tuple = (),
-    opt::LRMesolveOptions{AlgType} = LRMesolveOptions(),
-    kwargs...,
-) where {T1,T2,AlgType<:OrdinaryDiffEqAlgorithm}
-    prob = lr_mesolveProblem(H, z, B, t_l, c_ops; e_ops = e_ops, f_ops = f_ops, opt = opt, kwargs...)
+        H::QuantumObject{Operator},
+        z::AbstractArray{T2, 2},
+        B::AbstractArray{T2, 2},
+        tlist::AbstractVector,
+        c_ops::Union{AbstractVector, Tuple} = ();
+        e_ops::Union{AbstractVector, Tuple} = (),
+        f_ops::Union{AbstractVector, Tuple} = (),
+        opt::NamedTuple = lr_mesolve_options_default,
+        kwargs...,
+    ) where {T2}
+    prob = lr_mesolveProblem(H, z, B, tlist, c_ops; e_ops = e_ops, f_ops = f_ops, opt = opt, kwargs...)
     return lr_mesolve(prob; kwargs...)
 end
 
-#=======================================================#
-#                  OUTPUT GENNERATION
-#=======================================================#
-
-get_z(u::AbstractArray{T}, N::Integer, M::Integer) where {T} = reshape(view(u, 1:M*N), N, M)
-
-get_B(u::AbstractArray{T}, N::Integer, M::Integer) where {T} = reshape(view(u, (M*N+1):length(u)), M, M)
-
-@doc raw"""
-    lr_mesolve(prob::ODEProblem; kwargs...)
-    Solves the ODEProblem formulated by lr_mesolveProblem. The function is called by lr_mesolve.
-
-    Parameters
-    ----------
-    prob : ODEProblem
-        The ODEProblem formulated by lr_mesolveProblem.
-    kwargs : NamedTuple
-        Additional keyword arguments for the ODEProblem.
-"""
 function lr_mesolve(prob::ODEProblem; kwargs...)
-    sol = solve(prob, prob.p.opt.alg, tstops = prob.p.t_l)
+    sol = solve(prob, prob.p.opt.alg, tstops = prob.p.times)
     prob.p.opt.progress && print("\n")
 
     N = prob.p.N
     Ll = length.(sol.u)
     Ml = @. Int((sqrt(N^2 + 4 * Ll) - N) / 2)
 
-    if !haskey(kwargs, :saveat)
-        Bt = map(x -> get_B(x[1], N, x[2]), zip(sol.u, Ml))
-        zt = map(x -> get_z(x[1], N, x[2]), zip(sol.u, Ml))
-    else
-        Bt = get_B(sol.u, N, Ml)
-        zt = get_z(sol.u, N, Ml)
-    end
+    Bt = map(x -> get_B(x[1], N, x[2]), zip(sol.u, Ml))
+    zt = map(x -> get_z(x[1], N, x[2]), zip(sol.u, Ml))
+    ρt = map(x -> Qobj(x[1] * x[2] * x[1]', type = Operator(), dims = prob.p.Hdims), zip(zt, Bt))
 
-    return LRTimeEvolutionSol(sol.t, zt, Bt, prob.p.expvals, prob.p.funvals, prob.p.Ml)
+    return TimeEvolutionLRSol(
+        prob.p.times,
+        sol.t,
+        ρt,
+        prob.p.expvals,
+        prob.p.funvals,
+        sol.retcode,
+        prob.p.opt.alg,
+        sol.prob.kwargs[:abstol],
+        sol.prob.kwargs[:reltol],
+        zt,
+        Bt,
+        Ml,
+    )
 end

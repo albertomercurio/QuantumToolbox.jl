@@ -4,10 +4,14 @@
 *.jl.cov
 *.jl.mem
 Manifest.toml
-docs/build/
+Manifest-v*.toml
 
 .vscode
-*.json
+
+benchmarks/benchmarks_output.json
 
 .ipynb_checkpoints
 *.ipynb
+
+
+.devcontainer/*

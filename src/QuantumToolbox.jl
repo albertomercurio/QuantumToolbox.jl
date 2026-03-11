@@ -1,19 +1,16 @@
 module QuantumToolbox
 
-# Re-export:
-#   1. StaticArraysCore.SVector for the type of dims
-#   2. basic functions in LinearAlgebra and SparseArrays
-import Reexport: @reexport
-@reexport import StaticArraysCore: SVector
-@reexport using LinearAlgebra
-@reexport using SparseArrays
+## Standard Julia libraries
+using LinearAlgebra
+using SparseArrays
 
-# other functions in LinearAlgebra
-import LinearAlgebra: BlasReal, BlasInt, BlasFloat, BlasComplex, checksquare
-import LinearAlgebra.BLAS: @blasfunc
-import LinearAlgebra.LAPACK: hseqr!
+import Distributed: RemoteChannel
+import LinearAlgebra: checksquare
+import Pkg
+import Random: AbstractRNG, default_rng, seed!
+import Statistics: mean, std
 
-# SciML packages (for OrdinaryDiffEq and LinearSolve)
+## SciML packages (for QobjEvo, OrdinaryDiffEq, and LinearSolve)
 import SciMLBase:
     solve,
     solve!,
@@ -21,42 +18,87 @@ import SciMLBase:
     reinit!,
     remake,
     u_modified!,
+    NullParameters,
+    LinearProblem,
+    ODEFunction,
+    SDEFunction,
     ODEProblem,
+    SDEProblem,
     EnsembleProblem,
+    EnsembleAlgorithm,
+    EnsembleSerial,
     EnsembleThreads,
+    EnsembleSplitThreads,
+    EnsembleDistributed,
     FullSpecialize,
     CallbackSet,
     ContinuousCallback,
-    DiscreteCallback
-import SciMLOperators: MatrixOperator
-import LinearSolve: LinearProblem, SciMLLinearSolveAlgorithm, KrylovJL_MINRES, KrylovJL_GMRES
-import DiffEqBase: get_tstops
-import DiffEqCallbacks: PeriodicCallback, PresetTimeCallback, TerminateSteadyState
-import OrdinaryDiffEqCore: OrdinaryDiffEqAlgorithm
-import OrdinaryDiffEqTsit5: Tsit5
+    DiscreteCallback,
+    AbstractSciMLProblem,
+    AbstractODEIntegrator,
+    AbstractODEAlgorithm,
+    AbstractODESolution,
+    AbstractSDEAlgorithm
+import StochasticDiffEq: SRA2, SRIW1
+import SciMLOperators:
+    cache_operator,
+    iscached,
+    isconstant,
+    SciMLOperators,
+    AbstractSciMLOperator,
+    MatrixOperator,
+    ScalarOperator,
+    ScaledOperator,
+    AddedOperator,
+    ComposedOperator,
+    IdentityOperator,
+    update_coefficients!,
+    concretize
+import LinearSolve:
+    LinearSolve, SciMLLinearSolveAlgorithm, KrylovJL_MINRES, KrylovJL_GMRES, UMFPACKFactorization, LUFactorization, OperatorAssumptions
+import DiffEqCallbacks: PeriodicCallback, FunctionCallingCallback, FunctionCallingAffect, TerminateSteadyState
+import OrdinaryDiffEqCore
+import OrdinaryDiffEqVerner: Vern7
+import OrdinaryDiffEqLowOrderRK: DP5
+import DiffEqNoiseProcess: RealWienerProcess!, RealWienerProcess
 
-# other dependencies (in alphabetical order)
+## other dependencies (in alphabetical order)
 import ArrayInterface: allowed_getindex, allowed_setindex!
-import FFTW: fft, fftshift
+import FFTW: fft, ifft, fftfreq, fftshift
+import FillArrays: Eye
 import Graphs: connected_components, DiGraph
 import IncompleteLU: ilu
-import Pkg
-import Random
+import LaTeXStrings: @L_str
+import ProgressMeter: Progress, next!
 import SpecialFunctions: loggamma
-import StaticArraysCore: MVector
+import StaticArraysCore: SVector, MVector
 
-# Setting the number of threads to 1 allows
-# to achieve better performances for more massive parallelizations
-BLAS.set_num_threads(1)
+# Export functions from the other modules
 
-# Utility
+## LinearAlgebra
+export ishermitian, issymmetric, isposdef, dot, tr, svdvals, norm, normalize, normalize!, diag, Hermitian, Symmetric
+
+## SparseArrays
+export permute
+
+## SciMLOperators
+export cache_operator, iscached, isconstant
+
+# Source files
+
+## Utility
+include("settings.jl")
 include("utilities.jl")
 include("versioninfo.jl")
-include("progress_bar.jl")
 include("linear_maps.jl")
 
-# Quantum Object
+## Quantum Object
+include("qobj/space.jl")
+include("qobj/energy_restricted.jl")
+include("qobj/dimensions.jl")
+include("qobj/quantum_object_base.jl")
 include("qobj/quantum_object.jl")
+include("qobj/quantum_object_evo.jl")
 include("qobj/boolean_functions.jl")
 include("qobj/arithmetic_and_attributes.jl")
 include("qobj/eigsolve.jl")
@@ -65,24 +107,44 @@ include("qobj/states.jl")
 include("qobj/operators.jl")
 include("qobj/superoperators.jl")
 include("qobj/synonyms.jl")
-include("qobj/operator_sum.jl")
+include("qobj/block_diagonal_form.jl")
 
-# time evolution
+## time evolution
 include("time_evolution/time_evolution.jl")
+include("time_evolution/callback_helpers/callback_helpers.jl")
+include("time_evolution/callback_helpers/sesolve_callback_helpers.jl")
+include("time_evolution/callback_helpers/mesolve_callback_helpers.jl")
+include("time_evolution/callback_helpers/mcsolve_callback_helpers.jl")
+include("time_evolution/callback_helpers/ssesolve_callback_helpers.jl")
+include("time_evolution/callback_helpers/smesolve_callback_helpers.jl")
 include("time_evolution/mesolve.jl")
+include("time_evolution/brmesolve.jl")
 include("time_evolution/lr_mesolve.jl")
 include("time_evolution/sesolve.jl")
 include("time_evolution/mcsolve.jl")
+include("time_evolution/ssesolve.jl")
+include("time_evolution/smesolve.jl")
+include("time_evolution/liouvillian_dressed_nonsecular.jl")
 include("time_evolution/time_evolution_dynamical.jl")
 
-# Others
-include("permutation.jl")
+## Other functionalities
 include("correlations.jl")
 include("wigner.jl")
 include("spin_lattice.jl")
 include("arnoldi.jl")
+include("entropy.jl")
 include("metrics.jl")
 include("negativity.jl")
 include("steadystate.jl")
+include("spectrum.jl")
+
+## Visualization
+include("visualization/bloch_sphere.jl")
+include("visualization/fock_distribution.jl")
+include("visualization/matrix.jl")
+include("visualization/wigner.jl")
+
+## deprecated functions
+include("deprecated.jl")
 
 end

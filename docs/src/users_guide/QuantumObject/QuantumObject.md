@@ -14,6 +14,9 @@ The key difference between classical and quantum mechanics is the use of operato
 - `CUDA.CUSPARSE.CuSparseMatrixCSR` (sparse GPU matrix)
 - and even more ...
 
+!!! note "Support for GPU arrays"
+    See [CUDA extension](@ref doc:CUDA) for more details.
+
 We can create a [`QuantumObject`](@ref) with a user defined data set by passing an array of data into the [`QuantumObject`](@ref):
 
 ```@setup Qobj
@@ -42,6 +45,8 @@ Qobj(rand(4, 4))
 M = rand(ComplexF64, 4, 4)
 Qobj(M, dims = [2, 2])  # dims as Vector
 Qobj(M, dims = (2, 2))  # dims as Tuple (recommended)
+
+import QuantumToolbox: SVector # or using StaticArrays
 Qobj(M, dims = SVector(2, 2)) # dims as StaticArrays.SVector (recommended)
 ```
 
@@ -49,11 +54,11 @@ Qobj(M, dims = SVector(2, 2)) # dims as StaticArrays.SVector (recommended)
     Please note that here we put the `dims` as a tuple `(2, 2)`. Although it supports also `Vector` type (`dims = [2, 2]`), it is recommended to use `Tuple` or `SVector` from [`StaticArrays.jl`](https://github.com/JuliaArrays/StaticArrays.jl) to improve performance. For a brief explanation on the impact of the type of `dims`, see the Section [The Importance of Type-Stability](@ref doc:Type-Stability).
 
 ```@example Qobj
-Qobj(rand(4, 4), type = SuperOperator)
+Qobj(rand(4, 4), type = SuperOperator())
 ```
 
 !!! note "Difference between `dims` and `size`"
-    Notice that `type`, `dims`, and `size` will change according to the input `data`. Although `dims` and `size` appear to be the same, `dims` keep tracking the dimension of individual Hilbert spaces of a multipartite system, while `size` does not. We refer the reader to the section [tensor products and partial traces](@ref doc:Tensor-products) for more information.
+    Notice that `type`, `dims`, and `size` will change according to the input `data`. Although `dims` and `size` appear to be the same, `dims` keep tracking the dimension of individual Hilbert spaces of a multipartite system, while `size` does not. We refer the reader to the section [Tensor Products and Partial Traces](@ref doc:Tensor-products-and-Partial-Traces) for more information.
 
 ## States and operators
 
@@ -61,14 +66,16 @@ Manually specifying the data for each quantum object is inefficient. Even more s
 
 ### States
 - [`zero_ket`](@ref): zero ket vector
-- [`fock`](@ref) or [`basis`](@ref): fock state ket vector
-- [`fock_dm`](@ref): density matrix of a fock state
+- [`fock`](@ref) or [`basis`](@ref): Fock state ket vector
+- [`fock_dm`](@ref): density matrix of a Fock state
 - [`coherent`](@ref): coherent state ket vector 
 - [`rand_ket`](@ref): random ket vector
 - [`coherent_dm`](@ref): density matrix of a coherent state
 - [`thermal_dm`](@ref): density matrix of a thermal state
 - [`maximally_mixed_dm`](@ref): density matrix of a maximally mixed state
 - [`rand_dm`](@ref): random density matrix
+- [`enr_fock`](@ref): Fock state in the excitation number restricted (ENR) space
+- [`enr_thermal_dm`](@ref): thermal state in the excitation number restricted (ENR) space
 - [`spin_state`](@ref): spin state
 - [`spin_coherent`](@ref): coherent spin state
 - [`bell_state`](@ref): Bell state
@@ -103,6 +110,8 @@ Manually specifying the data for each quantum object is inefficient. Even more s
 - [`spin_J_set`](@ref): a set of Spin-`j` operators ``(S_x, S_y, S_z)``
 - [`fdestroy`](@ref): fermion destruction operator
 - [`fcreate`](@ref): fermion creation operator
+- [`enr_destroy`](@ref): destruction operator in the excitation number restricted (ENR) space
+- [`enr_identity`](@ref): identity operator in the excitation number restricted (ENR) space
 - [`commutator`](@ref): commutator or anti-commutator
 - [`tunneling`](@ref): tunneling operator
 - [`qft`](@ref): discrete quantum Fourier transform matrix
@@ -171,6 +180,7 @@ println(isoper(a)) # operator
 println(isoperket(a)) # operator-ket
 println(isoperbra(a)) # operator-bra
 println(issuper(a)) # super operator
+println(isconstant(a)) # time-independent or not
 println(ishermitian(a)) # Hermitian
 println(isherm(a)) # synonym of ishermitian(a)
 println(issymmetric(a)) # symmetric
@@ -191,6 +201,8 @@ Vector{Int64}(v_d)
 ```
 
 ```@example Qobj
+using SparseArrays
+
 v_s = SparseVector(v_d)
 ```
 
@@ -210,14 +222,14 @@ SparseMatrixCSC{Int64}(x_s)
 Matrix{Float64}(x_s)
 ```
 
-To convert between dense and sparse arrays, one can also use [`dense_to_sparse`](@ref) and [`sparse_to_dense`](@ref):
+To convert between dense and sparse arrays, one can also use [`to_sparse`](@ref) and [`to_dense`](@ref):
 
 ```@example Qobj
-x_d = sparse_to_dense(x_s)
+x_d = to_dense(x_s)
 ```
 
 ```@example Qobj
-dense_to_sparse(x_d)
+to_sparse(x_d)
 ```
 
 !!! note "Convert to GPU arrays"

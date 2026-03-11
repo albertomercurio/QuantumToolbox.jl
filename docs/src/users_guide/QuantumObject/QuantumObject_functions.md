@@ -10,6 +10,8 @@ Here is a table that summarizes all the supported linear algebra functions and a
 
 | **Description** | **Function call** | **Synonyms** |
 |:----------------|:------------------|:-------------|
+| zero-like array | [`zero(Q)`](@ref zero) | [`qzero_like(Q)`](@ref qzero_like) |
+| identity-like matrix | [`one(Q)`](@ref one) | [`qeye_like(Q)`](@ref qeye_like) |
 | conjugate | [`conj(Q)`](@ref conj) | - |
 | transpose | [`transpose(Q)`](@ref transpose) | [`trans(Q)`](@ref trans) |
 | conjugate transposition | [`adjoint(Q)`](@ref adjoint) | [`Q'`](@ref adjoint), [`dag(Q)`](@ref dag) |
@@ -41,8 +43,6 @@ Here is a table that summarizes all the supported linear algebra functions and a
 
 - [`eigenenergies`](@ref): return eigenenergies (eigenvalues)
 - [`eigenstates`](@ref): return [`EigsolveResult`](@ref) (contains eigenvalues and eigenvectors)
-- [`eigvals`](@ref): return eigenvalues
-- [`eigen`](@ref): using dense eigen solver and return [`EigsolveResult`](@ref) (contains eigenvalues and eigenvectors)
 - [`eigsolve`](@ref): using sparse eigen solver and return [`EigsolveResult`](@ref) (contains eigenvalues and eigenvectors)
 - [`eigsolve_al`](@ref): using the Arnoldi-Lindblad eigen solver and return [`EigsolveResult`](@ref) (contains eigenvalues and eigenvectors)
 

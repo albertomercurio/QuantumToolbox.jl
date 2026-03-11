@@ -18,7 +18,7 @@ A **linear map** is a transformation `L` that satisfies:
     L(cu) = cL(u)
     ```
 
-It is typically represented as a matrix with dimensions given by `size`, and this abtract type helps to define this map when the matrix is not explicitly available.
+It is typically represented as a matrix with dimensions given by `size`, and this abstract type helps to define this map when the matrix is not explicitly available.
 
 ## Methods
 
@@ -30,7 +30,7 @@ It is typically represented as a matrix with dimensions given by `size`, and thi
 
 As an example, we now define the linear map used in the [`eigsolve_al`](@ref) function for Arnoldi-Lindblad eigenvalue solver:
 
-```julia-repl
+```julia
 struct ArnoldiLindbladIntegratorMap{T,TS,TI} <: AbstractLinearMap{T,TS}
     elty::Type{T}
     size::TS
@@ -46,7 +46,7 @@ end
 
 where `integrator` is the ODE integrator for the time-evolution. In this way, we can diagonalize this linear map using the [`eigsolve`](@ref) function.
 """
-abstract type AbstractLinearMap{T,TS} end
+abstract type AbstractLinearMap{T, TS} end
 
 Base.eltype(A::AbstractLinearMap{T}) where {T} = T
 
