@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased](https://github.com/qutip/QuantumToolbox.jl/tree/main)
 
 - [lib] Introduce `QuantumToolboxCore` library. ([#686])
+- Speed up `mcsolve` by changing the default of `ContinuousLindbladJumpCallback` from `interp_points = 10` to `interp_points = 0`. Since `mcsolve` propagates the unnormalized state under the non-Hermitian effective Hamiltonian, `d⟨ψ|ψ⟩/dt = -Σₙ⟨ψ|Ĉₙ†Ĉₙ|ψ⟩ ≤ 0`, so the norm decreases monotonically between jumps and the jump condition can change sign at most once per solver step. Checking only the step endpoints is therefore exact, whereas the previous default also evaluated the ODE interpolant at 9 interior points on every accepted step. Trajectories are bit-for-bit unchanged; the driven Jaynes-Cummings benchmark gets `1.2x` to `1.6x` faster, with the largest gains at small Hilbert space dimensions. Pass `interp_points > 0` to restore the old behaviour, which is only needed if a deliberately non-Hermitian `H` breaks the monotonicity of the norm.
 
 ## [v0.47.3]
 Release date: 2026-07-28
