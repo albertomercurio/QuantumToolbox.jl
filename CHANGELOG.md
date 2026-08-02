@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use `StochasticDiffEqHighOrder` as dependency instead of `StochasticDiffEq` for stochastic solvers. ([#682])
 - Fix arithmetic operations (`+`, `-`, `*`) for quantum objects. ([#688])
 - Throw `ArgumentError` for the functions that should not allow time-dependent collapse operators (`c_ops`). ([#689])
+- Add documentation, tests and a runnable benchmark harness to the experimental `QuantumToolboxOperators` sub-package (`lib/QuantumToolboxOperators`), and fix several blocking defects in it: `LocalTensorProductOperator` crashed for a single operator acting on the last subsystem, `concretize` failed on composite operators, `L * v` (and hence `expect`/`dot`) was missing, and the compat bounds made the sub-package unresolvable on Julia 1.10/1.11. See its `STATUS.md` for the integration status with `QuantumToolbox.jl`.
 
 ## [v0.44.0]
 Release date: 2026-03-11

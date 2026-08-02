@@ -1,128 +1,135 @@
+#!/usr/bin/env julia
+#
+# Benchmark driver for QuantumToolboxOperators.
+#
+#     julia --project=benchmarks --startup-file=no benchmarks/runbenchmarks.jl
+#
+# Environment:
+#   QTO_BENCH_SIZE=smoke|full   problem sizes (default "full"; "smoke" runs in ~2 min)
+#   QTO_BENCH_REACTANT=1        also measure the XLA backend (each `@compile` costs minutes)
+#
+# Degrades gracefully: no GPU or no working Reactant produces `n/a` cells, never a crash.
+
+using Pkg
 using LinearAlgebra
 using SparseArrays
-using SciMLOperators
+using Random
+using Printf
+
+using QuantumToolbox
 using QuantumToolboxOperators
+using SciMLOperators
+using SciMLOperators: cache_operator, concretize
 using CUDA
-# using Metal
-using Reactant
-using Adapt
-using Chairmarks
-using BenchmarkTools
-using Markdown
 
-has_cuda = isdefined(Main, :CUDA)
+Random.seed!(20260802)
+BLAS.set_num_threads(1)   # reproducibility: these are memory-bound kernels, not BLAS-bound
 
-# %%
+include("common.jl")
 
-N = 1000000
-T = ComplexF32
-a = DestroyOperator{T}(N)
-# a_sparse = spdiagm(1 => sqrt.(T.(1:N-1)))
-a_sparse = concretize(a)
+# ─── Reactant is optional and slow to load, so bring it in only on request ────
 
-Base.summarysize(a_sparse) / Base.summarysize(a)
+const REACTANT_OK = Ref(false)
 
-# %%
+if WANT_REACTANT
+    try
+        @eval using Reactant
+        REACTANT_OK[] = true
+        REACTANT_STATUS[] = "enabled"
+    catch err
+        @warn "Reactant requested but unavailable; XLA columns will read n/a" exception = err
+        REACTANT_STATUS[] = "unavailable"
+    end
+else
+    REACTANT_STATUS[] = "not requested (set QTO_BENCH_REACTANT=1)"
+end
 
-ψ = randn(T, N) |> normalize
-dψ = similar(ψ)
+include("cases_single_mode.jl")
+include("cases_tensor.jl")
 
-ψ_gpu = has_cuda ? CuArray(ψ) : MtlArray(ψ)
-dψ_gpu = similar(ψ_gpu)
+# ─── Run ─────────────────────────────────────────────────────────────────────
 
-ψ_reactant = Reactant.to_rarray(ψ)
-dψ_reactant = similar(ψ_reactant)
+PKG_VERSIONS[] = collect_pkg_versions()
 
-# %%
+const BACKENDS = [CPU_BACKEND, cuda_backend()]
 
-a_sparse_gpu = has_cuda ? CUSPARSE.CuSparseMatrixCSR(a_sparse) : missing
+@info "Running benchmarks" size = SIZE reactant = REACTANT_OK[] cuda = CUDA.functional()
 
-# %%
+@info "Single-mode operators…"
+bench_single_mode!(BACKENDS)
 
-# ------- CPU -------
+@info "Multi-mode tensor products…"
+bench_tensor!(BACKENDS)
 
-mul!(dψ, a, ψ)
-mul!(dψ, a_sparse, ψ)
+# ─── Report ──────────────────────────────────────────────────────────────────
 
-@be mul!(dψ, a, ψ)
-@be mul!(dψ, a_sparse, ψ)
+const OUTDIR = joinpath(@__DIR__, "results")
+mkpath(OUTDIR)
 
-# ------- GPU -------
+open(joinpath(OUTDIR, "RESULTS.md"), "w") do io
+    provenance_header(io)
 
-mul!(dψ_gpu, a, ψ_gpu)
-has_cuda && mul!(dψ_gpu, a_sparse_gpu, ψ_gpu)
+    single = filter(r -> r.group == "single", RESULTS)
+    tensor = filter(r -> r.group == "tensor", RESULTS)
 
-@be mul!($dψ_gpu, $a, $ψ_gpu)
-has_cuda && @be mul!($dψ_gpu, $a_sparse_gpu, $ψ_gpu)
+    println(io, "## Single-mode operators\n")
+    println(
+        io, "Hilbert-space dimension ", SIZE == "smoke" ? "10⁴" : "10⁶", ", `ComplexF32`. ",
+        "`Kerr H` is `Δ â†â + U (â†)²â² + F(â + â†)`; the rows above it are its individual terms.\n"
+    )
+    emit_table(io, single; columns = time_columns())
 
-# ------- Reactant -------
+    println(io, "### Memory\n")
+    println(
+        io, "`operator` is before `cache_operator`, `cached` after. For single-mode operators ",
+        "caching is a no-op, so the two agree.\n"
+    )
+    emit_table(
+        io, filter(r -> r.backend == "CPU", single);
+        columns = [
+            "Case" => r -> r.case,
+            "Variant" => r -> r.variant,
+            "operator" => r -> fmt_bytes(r.bytes_op),
+            "cached" => r -> fmt_bytes(r.bytes_cached),
+        ],
+    )
 
-mul_compiled! = @compile mul!(dψ_reactant, a, ψ_reactant)
-mul_compiled!(dψ_reactant, a, ψ_reactant)
+    println(io, "## Multi-mode tensor products\n")
+    println(
+        io, "`H = Σₙ Aₙ Bₙ₊₁` over a nearest-neighbor chain, compared against QuantumToolbox's ",
+        "sparse `multisite_operator` and against `SciMLOperators.TensorProductOperator`.\n"
+    )
+    emit_table(io, tensor; columns = time_columns())
 
-@be mul_compiled!($dψ_reactant, $a, $ψ_reactant)
+    println(io, "### Memory\n")
+    emit_table(
+        io, filter(r -> r.backend == "CPU", tensor);
+        columns = [
+            "Case" => r -> r.case,
+            "Variant" => r -> r.variant,
+            "operator" => r -> fmt_bytes(r.bytes_op),
+            "cached" => r -> fmt_bytes(r.bytes_cached),
+        ],
+    )
+end
 
-# %% -------------- Real Hamiltonian ---------------
+# Raw rows, so STATUS.md figures can be re-derived without re-running.
+open(joinpath(OUTDIR, "results.json"), "w") do io
+    println(io, "[")
+    for (i, r) in enumerate(RESULTS)
+        fields = join(
+            (
+                "\"$k\": " * (
+                        getfield(r, k) === nothing ? "null" :
+                        getfield(r, k) isa AbstractString ? "\"$(getfield(r, k))\"" : string(getfield(r, k))
+                    ) for k in fieldnames(Result)
+            ), ", ",
+        )
+        println(io, "  {", fields, i == length(RESULTS) ? "}" : "},")
+    end
+    println(io, "]")
+end
 
-Δ = 0.1f0
-U = 0.2f0
-F = 0.3f0
-
-H = Δ * a' * a + U * (a'^2 * a^2) + F * (a + a')
-H = cache_operator(H, ψ)
-H_sparse = Δ * (a_sparse' * a_sparse) + U * (a_sparse'^2 * a_sparse^2) + F * (a_sparse + a_sparse')
-
-H_sparse_gpu = has_cuda ? CUSPARSE.CuSparseMatrixCSR(H_sparse) : missing
-
-# %%
-
-mul!(dψ, H, ψ)
-mul!(dψ, H_sparse, ψ)
-
-@be mul!($dψ, $H, $ψ)
-@be mul!($dψ, $H_sparse, $ψ)
-
-
-mul!(dψ_gpu, H, ψ_gpu)
-has_cuda && mul!(dψ_gpu, H_sparse_gpu, ψ_gpu)
-
-@be mul!($dψ_gpu, $H, $ψ_gpu)
-has_cuda && @be mul!($dψ_gpu, $H_sparse_gpu, $ψ_gpu)
-
-
-mul_H_compiled! = @compile mul!(dψ_reactant, H, ψ_reactant)
-mul_H_compiled!(dψ_reactant, H, ψ_reactant)
-
-@be mul_H_compiled!($dψ_reactant, $H, $ψ_reactant)
-
-# %%
-
-memory_ratio = Base.summarysize(H_sparse) / Base.summarysize(H)
-
-# %% -------------- Print all the results on a table ---------------
-
-bench_a_cpu = (tmp = @be mul!(dψ, a, ψ); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-bench_a_sparse_cpu = (tmp = @be mul!(dψ, a_sparse, ψ); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-
-bench_a_gpu = (tmp = @be mul!(dψ_gpu, a, ψ_gpu); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-bench_a_sparse_gpu = has_cuda ? (tmp = @be mul!(dψ_gpu, a_sparse_gpu, ψ_gpu); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6 : missing
-
-
-bench_a_reactant = (tmp = @be mul_compiled!($dψ_reactant, $a, $ψ_reactant); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-
-bench_H_cpu = (tmp = @be mul!(dψ, H, ψ); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-bench_H_sparse_cpu = (tmp = @be mul!(dψ, H_sparse, ψ); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-
-bench_H_gpu = (tmp = @be mul!(dψ_gpu, H, ψ_gpu); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-bench_H_sparse_gpu = has_cuda ? (tmp = @be mul!(dψ_gpu, H_sparse_gpu, ψ_gpu); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6 : missing
-
-bench_H_reactant = (tmp = @be mul_H_compiled!($dψ_reactant, $H, $ψ_reactant); sum(x -> x.time, tmp.samples) / length(tmp.samples)) * 1.0e6
-
-md"""
-Memory ratio (sparse/dense): $(round(memory_ratio * 1e-3, digits=2)) k
-
-| Operator | CPU (Lazy) | CPU (Sparse) | GPU (Lazy) | GPU (Sparse) | Reactant (Lazy) |
-|:--------:|:----------:|:------------:|:----------:|:------------:|:----------------:|
-| a        | $(round(bench_a_cpu, digits=2)) μs | $(round(bench_a_sparse_cpu, digits=2)) μs | $(round(bench_a_gpu, digits=2)) μs | $(bench_a_sparse_gpu === missing ? "N/A" : string(round(bench_a_sparse_gpu, digits=2)) * " μs") | $(round(bench_a_reactant, digits=2)) μs |
-| H        | $(round(bench_H_cpu, digits=2)) μs | $(round(bench_H_sparse_cpu, digits=2)) μs | $(round(bench_H_gpu, digits=2)) μs | $(bench_H_sparse_gpu === missing ? "N/A" : string(round(bench_H_sparse_gpu, digits=2)) * " μs") | $(round(bench_H_reactant, digits=2)) μs |
-"""
+nfail = count(r -> r.status == "FAIL", RESULTS)
+@info "Wrote $(joinpath(OUTDIR, "RESULTS.md"))" rows = length(RESULTS) failures = nfail
+nfail == 0 || @error "$nfail correctness check(s) FAILED — do not publish these numbers"

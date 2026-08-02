@@ -12,20 +12,38 @@ abstract type BosonicOperator{T} <: AbstractSciMLOperator{T} end
 const BosonicOrAdjoint{T} = Union{BosonicOperator{T}, AdjointOperator{T, <:BosonicOperator{T}}} where {T}
 
 SciMLOperators.issquare(::BosonicOrAdjoint) = true
-SciMLOperators.cache_operator(L::BosonicOrAdjoint, ::AbstractVecOrMat) = L
+
+# These operators hold no buffers, so `cache_self`'s default (identity) is already correct.
+#
+# `cache_internals` must be overridden, though. SciMLOperators' generic `AdjointOperator` method
+# does `cache_operator(L.L, reshape(u, size(L, 1)))` (`left.jl:172`), and a `TensorProductOperator`
+# caches its factors by handing each one the *whole* state vector — so that reshape throws for an
+# adjoint bosonic factor. There is nothing to cache here in any case.
+SciMLOperators.cache_internals(L::BosonicOrAdjoint, ::AbstractVecOrMat) = L
+
+Base.:*(L::BosonicOrAdjoint, v::AbstractVecOrMat) = mul!(similar(v, Base.promote_eltype(L, v)), L, v)
+
 
 # ─── Type-aware coefficient helpers ──────────────────────────────────────────
 # Avoid sqrt(::Int) → Float64 promotion when working with Float32 / other types.
 
 _sqrt_coeff(::Type{T}, i::Integer) where {T} = sqrt(real(T)(i))
 
-function _power_coeff(::Type{T}, i::Integer, k::Integer) where {T}
+"""
+    _rising_product(T, i, k)
+
+``\\prod_{m=i}^{i+k-1} m``, the rising factorial behind every Fock-basis coefficient here.
+"""
+function _rising_product(::Type{T}, i::Integer, k::Integer) where {T}
     c = one(T)
     for m in i:(i + k - 1)
         c *= real(T)(m)
     end
-    return sqrt(c)
+    return c
 end
+
+# Coefficient of â^k: ⟨n-k| â^k |n⟩ = √(n!/(n-k)!)
+_power_coeff(::Type{T}, i::Integer, k::Integer) where {T} = sqrt(_rising_product(T, i, k))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DestroyOperator
@@ -53,7 +71,6 @@ end
 DestroyOperator(N::Int) = DestroyOperator{Float64}(N)
 
 Base.size(L::DestroyOperator) = (L.N, L.N)
-Base.size(L::DestroyOperator, n::Int) = size(L)[n]
 
 SciMLOperators.islinear(::DestroyOperator) = true
 SciMLOperators.has_adjoint(::DestroyOperator) = true
@@ -72,7 +89,7 @@ function LinearAlgebra.mul!(
     ) where {T}
     N = L.N
 
-    lmul!(β, w)
+    isone(β) || lmul!(β, w)
     @views w[1:(N - 1), :] .+= α .* _sqrt_coeff.(T, 1:(N - 1)) .* v[2:N, :]
 
     return w
@@ -99,7 +116,7 @@ function LinearAlgebra.mul!(
     ) where {T}
     N = L.L.N
 
-    lmul!(β, w)
+    isone(β) || lmul!(β, w)
     @views w[2:N, :] .+= α .* _sqrt_coeff.(T, 1:(N - 1)) .* v[1:(N - 1), :]
 
     return w
@@ -116,7 +133,7 @@ Matrix-free bosonic number operator with optional shift.
 
 Action: ``w_i = (i - 1 + \\text{shift}) \\cdot v_i``.
 
-    - `shift = 0` represents ``\\hat{n} = â†â`` with eigenvalues ``0, 1, 2, …``
+  - `shift = 0` represents ``\\hat{n} = â†â`` with eigenvalues ``0, 1, 2, …``
   - `shift = 1` represents ``ââ†`` with eigenvalues ``1, 2, 3, …``
 """
 struct NumberOperator{T} <: BosonicOperator{T}
@@ -132,7 +149,6 @@ end
 NumberOperator(N::Int; shift::T = zero(Float64)) where {T} = NumberOperator{T}(N; shift)
 
 Base.size(L::NumberOperator) = (L.N, L.N)
-Base.size(L::NumberOperator, n::Int) = size(L)[n]
 
 SciMLOperators.islinear(::NumberOperator) = true
 SciMLOperators.has_adjoint(::NumberOperator) = true
@@ -184,7 +200,6 @@ end
 DestroyPowerOperator(N::Int, k::Integer) = DestroyPowerOperator{Float64}(N, k)
 
 Base.size(L::DestroyPowerOperator) = (L.N, L.N)
-Base.size(L::DestroyPowerOperator, n::Int) = size(L)[n]
 
 SciMLOperators.islinear(::DestroyPowerOperator) = true
 SciMLOperators.has_adjoint(::DestroyPowerOperator) = true
@@ -203,7 +218,7 @@ function LinearAlgebra.mul!(
     ) where {T}
     N, k = L.N, L.k
 
-    lmul!(β, w)
+    isone(β) || lmul!(β, w)
     @views w[1:(N - k), :] .+= α .* _power_coeff.(T, 1:(N - k), Ref(k)) .* v[(k + 1):N, :]
 
     return w
@@ -230,7 +245,7 @@ function LinearAlgebra.mul!(
     ) where {T}
     N, k = L.L.N, L.L.k
 
-    lmul!(β, w)
+    isone(β) || lmul!(β, w)
     @views w[(k + 1):N, :] .+= α .* _power_coeff.(T, 1:(N - k), Ref(k)) .* v[1:(N - k), :]
 
     return w
@@ -268,7 +283,6 @@ end
 NormalOrderedOperator(N::Int, k::Integer, n::Integer) = NormalOrderedOperator{Float64}(N, k, n)
 
 Base.size(L::NormalOrderedOperator) = (L.N, L.N)
-Base.size(L::NormalOrderedOperator, _::Int) = size(L)[1]
 
 SciMLOperators.islinear(::NormalOrderedOperator) = true
 SciMLOperators.has_adjoint(::NormalOrderedOperator) = true
@@ -280,9 +294,13 @@ end
 
 # ─── Helper: coefficient for normal-ordered product ──────────────────────────
 # c_j = _power_coeff(T, j, n) * _power_coeff(T, j, k)
-# = sqrt(j*(j+1)*...*(j+n-1)) * sqrt(j*(j+1)*...*(j+k-1))
+#     = sqrt(j*(j+1)*...*(j+n-1)) * sqrt(j*(j+1)*...*(j+k-1))
 
 function _normal_ordered_coeff(::Type{T}, j::Int, n::Integer, k::Integer) where {T}
+    # When k == n the operator is diagonal and the two square roots cancel exactly:
+    # √c · √c = c. Taking them removes two `sqrt`s *per element* from the hot loop —
+    # which is the dominant cost of a Kerr term (â†)²â². Do not "simplify" this away.
+    n == k && return _rising_product(T, j, n)
     return _power_coeff(T, j, n) * _power_coeff(T, j, k)
 end
 
@@ -304,7 +322,7 @@ function LinearAlgebra.mul!(
     N, k, n = L.N, L.k, L.n
     len = N - max(k, n)
 
-    lmul!(β, w)
+    isone(β) || lmul!(β, w)
     @views w[(k + 1):(len + k), :] .+= α .* _normal_ordered_coeff.(T, 1:len, Ref(n), Ref(k)) .* v[(n + 1):(len + n), :]
 
     return w
@@ -313,6 +331,24 @@ end
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Algebraic Simplifications
 # ══════════════════════════════════════════════════════════════════════════════
+#
+# Composing two operators normally yields a `SciMLOperators.ComposedOperator`, which applies its
+# factors one after another: `a' * a` would run â, write an intermediate vector, then run â† over
+# it — two passes plus an allocation. But â†â is analytically just n̂, a single diagonal pass.
+#
+# These `Base.:*` and `Base.:^` methods intercept the composition and return the simplified type
+# instead. The rewrite fires once, when the expression is *built* — not on every `mul!` — so it
+# costs nothing at solve time:
+#
+#     a' * a          →  NumberOperator                     (n̂)
+#     a * a'          →  NumberOperator(shift = 1)          (ââ† = n̂ + 1)
+#     a * a,  a^k     →  DestroyPowerOperator               (â^k)
+#     a' * a', (a')^k →  adjoint(DestroyPowerOperator)      ((â†)^k)
+#     (a')^k * a^n    →  NormalOrderedOperator              ((â†)^k â^n)
+#     (Δ * a') * a    →  Δ * NumberOperator                 (scalar peeled, see below)
+#
+# Anything with no rule falls back to SciMLOperators' generic lazy types, which is correct —
+# just slower. `a + a'`, for instance, stays an `AddedOperator`.
 
 # ─── ScaledOperator unwrap rules ─────────────────────────────────────────────
 # Peel the scalar so that the inner operator hits the algebraic simplification
@@ -412,6 +448,15 @@ end
 # ═══════════════════════════════════════════════════════════════════════════════
 #  concretize: convert to sparse matrix
 # ═══════════════════════════════════════════════════════════════════════════════
+#
+# SciMLOperators reaches concretization of a *composite* operator through `convert`, not through
+# `concretize` — e.g. `convert(AbstractMatrix, ::AddedOperator)` sums `convert` over its terms.
+# Without these two hooks, `concretize(a + a')` or `concretize(H)` for any composed Hamiltonian
+# throws a `MethodError`. `AdjointOperator` needs no hook: SciMLOperators already forwards it to
+# the wrapped operator.
+
+Base.convert(::Type{AbstractMatrix}, L::BosonicOperator) = concretize(L)
+SciMLOperators.has_concretization(::BosonicOperator) = true
 
 function SciMLOperators.concretize(L::DestroyOperator{T}) where {T}
     N = L.N
