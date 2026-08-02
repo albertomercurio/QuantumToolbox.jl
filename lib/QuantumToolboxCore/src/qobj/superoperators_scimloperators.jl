@@ -55,10 +55,7 @@ end
 SciMLOperators.isconstant(op::SpostSuperOperator) = isconstant(op.R)
 SciMLOperators.iscached(op::SpostSuperOperator) = true  # no cache needed
 
-function SciMLOperators.cache_operator(op::SpostSuperOperator, u::AbstractMatrix)
-    R_cached = cache_operator(op.R, u)
-    return SpostSuperOperator(R_cached)
-end
+SciMLOperators.cache_internals(op::SpostSuperOperator, u::AbstractMatrix) = SpostSuperOperator(cache_operator(op.R, u))
 
 function SciMLOperators.update_coefficients!(op::SpostSuperOperator, u::AbstractMatrix, p, t)
     update_coefficients!(op.R, u, p, t)
@@ -130,15 +127,12 @@ function SciMLOperators.update_coefficients!(op::SprePostSuperOperator, u::Abstr
     return op
 end
 
-function SciMLOperators.cache_operator(op::SprePostSuperOperator, u::AbstractMatrix)
-    L_cached = cache_operator(op.L, u)
-    R_cached = cache_operator(op.R, u)
-    cache = similar(u)
-    return SprePostSuperOperator(L_cached, R_cached, cache)
-end
+SciMLOperators.cache_self(op::SprePostSuperOperator, u::AbstractMatrix) = SprePostSuperOperator(op.L, op.R, similar(u))
+
+SciMLOperators.cache_internals(op::SprePostSuperOperator, u::AbstractMatrix) =
+    SprePostSuperOperator(cache_operator(op.L, u), cache_operator(op.R, u), op.cache)
 
 SciMLOperators.getcache(op::SprePostSuperOperator) = op.cache
 
-function SciMLOperators._get_cache_shapes(::SprePostSuperOperator, u::AbstractMatrix)
-    return size(u)
-end
+SciMLOperators.adopt_cache(op::SprePostSuperOperator, cache, u::AbstractMatrix) =
+    SciMLOperators.cache_internals(SciMLOperators.update_cache(op, cache), u)

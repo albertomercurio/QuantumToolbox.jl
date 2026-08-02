@@ -68,8 +68,6 @@ import SciMLBase:
     AbstractSDEAlgorithm
 import StochasticDiffEqHighOrder: SRA2, SRIW1
 import SciMLOperators:
-    _get_cache_shapes,
-    getcache,
     cache_operator,
     isconstant,
     SciMLOperators,
