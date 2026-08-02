@@ -19,6 +19,7 @@ import SciMLOperators: islinear, has_adjoint, concretize, cache_operator, iscach
 export BosonicOperator, DestroyOperator, NumberOperator, DestroyPowerOperator, NormalOrderedOperator
 export LocalTensorProductOperator
 
+include("common.jl")
 include("bosonic.jl")
 include("tensor_product.jl")
 

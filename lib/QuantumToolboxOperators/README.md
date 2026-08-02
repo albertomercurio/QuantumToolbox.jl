@@ -97,9 +97,31 @@ Numbers, method, and what is being worked on: [STATUS.md](STATUS.md).
 ## Limitations
 
   * Bosonic single-mode operators only — no spin/qubit types (use `MatrixOperator`).
-  * `LocalTensorProductOperator` acts on `AbstractVector`, not `AbstractMatrix`.
   * No lazy superoperators, which is what limits the open-system solvers.
   * A cached operator is not thread-safe; its work buffers are shared.
+
+## Acting on a density matrix
+
+Every operator here applies to a matrix state as well as a vector one, treating it as a batch of
+columns — which is left multiplication `Ô ρ̂`. Right multiplication works too, and both stay
+matrix-free:
+
+```julia
+ρ = randn(ComplexF64, N, N)
+mul!(similar(ρ), a, ρ)      # â ρ̂
+a * ρ                        # same, allocating
+ρ * a                        # ρ̂ â
+```
+
+For `LocalTensorProductOperator` the work buffers have to be sized for the batch, so pass
+`cache_operator` a state of the shape you intend to use:
+
+```julia
+L = cache_operator(LocalTensorProductOperator(dims, 1 => A), ρ)   # not `..., ψ`
+```
+
+`ρ * L` is ~3× slower than `L * ρ` there: SciMLOperators rewrites it as `adjoint(L' * ρ')`, and the
+`Adjoint` state costs `permutedims!` its fast path.
 
 ## Tests
 

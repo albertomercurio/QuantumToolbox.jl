@@ -142,8 +142,14 @@ end
 end
 
 @testset "Action on matrices" begin
+    # `check_operator` already compares the matrix path against the sparse reference. This adds a
+    # second, independent oracle — the matrix result must equal the columns computed one at a time
+    # — plus the two things only a matrix state can exercise: right multiplication `ρ Â`, and the
+    # requirement that neither side allocate, since a density matrix is where a fallback that
+    # materializes the operator would hurt most.
     N, ncols = 10, 4
     V = randn(ComplexF64, N, ncols)
+    ρ = randn(ComplexF64, N, N)
 
     for op in (
             DestroyOperator(N), adjoint(DestroyOperator(N)),
@@ -151,6 +157,8 @@ end
             DestroyPowerOperator(N, 2), adjoint(DestroyPowerOperator(N, 2)),
             NormalOrderedOperator(N, 2, 3),
         )
+        ref = concretize(op)
+
         W, W_col = similar(V), similar(V)
         mul!(W, op, V)
         for c in 1:ncols
@@ -166,21 +174,73 @@ end
             mul!(view(W2_col, :, c), op, view(V, :, c), α, β)
         end
         @test W2 ≈ W2_col
+
+        # Left and right multiplication of a density matrix. `ρ * op` is serviced by
+        # SciMLOperators' `*(::AbstractVecOrMat, ::AbstractSciMLOperator)`, which routes through
+        # `adjoint` back into the methods here — so it stays matrix-free too.
+        @test op * ρ ≈ ref * ρ
+        @test ρ * op ≈ ρ * ref
+
+        Wρ = similar(ρ)
+        mul!(Wρ, op, ρ)                    # compile before measuring
+        @test (@allocated mul!(Wρ, op, ρ)) == 0
     end
+end
+
+@testset "Composite operators act on matrices" begin
+    # An `AddedOperator` of `ScaledOperator`s over a matrix state: the case a density-matrix solver
+    # actually builds. Correctness comes from `check_operator`; what is pinned here is that the
+    # composite stays lazy rather than concretizing each term.
+    N = 10
+    a = DestroyOperator{ComplexF64}(N)
+    A = _sparse_destroy(N)
+    ρ = randn(ComplexF64, N, N)
+
+    Δ, U, F = 0.1, 0.2, 0.3
+    H = cache_operator(Δ * a' * a + U * (a'^2 * a^2) + F * (a + a'), ρ)
+    H_ref = Δ * (A' * A) + U * (A'^2 * A^2) + F * (A + A')
+
+    W = similar(ρ)
+    @test mul!(W, H, ρ) ≈ H_ref * ρ
+    @test H * ρ ≈ H_ref * ρ
+    @test ρ * H ≈ ρ * H_ref
+
+    mul!(W, H, ρ)
+    @test (@allocated mul!(W, H, ρ)) == 0
 end
 
 @testset "Type stability" begin
     N = 10
-    v = randn(ComplexF64, N)
-    w = similar(v)
 
-    for op in (
-            DestroyOperator(N), adjoint(DestroyOperator(N)), NumberOperator(N),
-            DestroyPowerOperator(N, 2), adjoint(DestroyPowerOperator(N, 2)),
-            NormalOrderedOperator(N, 2, 3),
-        )
-        @test (@inferred mul!(w, op, v)) === w
-        @test (@inferred mul!(w, op, v, 1.0, 0.0)) === w
+    for state in (randn(ComplexF64, N), randn(ComplexF64, N, 3))
+        u = similar(state)
+
+        for op in (
+                DestroyOperator(N), adjoint(DestroyOperator(N)), NumberOperator(N),
+                DestroyPowerOperator(N, 2), adjoint(DestroyPowerOperator(N, 2)),
+                NormalOrderedOperator(N, 2, 3),
+            )
+            @test (@inferred mul!(u, op, state)) === u
+            @test (@inferred mul!(u, op, state, 1.0, 0.0)) === u
+        end
+    end
+end
+
+@testset "Mismatched state sizes are rejected" begin
+    # These operators address the state through views like `v[2:N, :]`, so an over-long `v` used to
+    # produce a plausible answer computed from a prefix of it, with no error at all.
+    N = 10
+    ops = (
+        DestroyOperator(N), adjoint(DestroyOperator(N)), NumberOperator(N),
+        DestroyPowerOperator(N, 2), adjoint(DestroyPowerOperator(N, 2)),
+        NormalOrderedOperator(N, 2, 3),
+    )
+    for op in ops
+        @test_throws DimensionMismatch mul!(randn(ComplexF64, N), op, randn(ComplexF64, 2N))
+        @test_throws DimensionMismatch mul!(randn(ComplexF64, 2N), op, randn(ComplexF64, N))
+        @test_throws DimensionMismatch mul!(randn(ComplexF64, N, 3), op, randn(ComplexF64, N, 4))
+        @test_throws DimensionMismatch mul!(randn(ComplexF64, N), op, randn(ComplexF64, 2N), 1.0, 0.0)
+        @test_throws DimensionMismatch mul!(randn(ComplexF64, N, 3), op, randn(ComplexF64, N, 4), 1.0, 0.0)
     end
 end
 

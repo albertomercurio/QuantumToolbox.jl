@@ -76,6 +76,7 @@ SciMLOperators.islinear(::DestroyOperator) = true
 SciMLOperators.has_adjoint(::DestroyOperator) = true
 
 function LinearAlgebra.mul!(w::AbstractVecOrMat, L::DestroyOperator{T}, v::AbstractVecOrMat) where {T}
+    _check_mul_args(L, w, v)
     N = L.N
 
     fill!(w, zero(eltype(w)))
@@ -87,6 +88,7 @@ end
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::DestroyOperator{T}, v::AbstractVecOrMat, α, β,
     ) where {T}
+    _check_mul_args(L, w, v)
     N = L.N
 
     isone(β) || lmul!(β, w)
@@ -103,6 +105,7 @@ const AdjointDestroyOperator{T} = AdjointOperator{T, <:DestroyOperator{T}} where
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::AdjointOperator{T, <:DestroyOperator{T}}, v::AbstractVecOrMat,
     ) where {T}
+    _check_mul_args(L, w, v)
     N = L.L.N
 
     fill!(w, zero(eltype(w)))
@@ -114,6 +117,7 @@ end
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::AdjointOperator{T, <:DestroyOperator{T}}, v::AbstractVecOrMat, α, β,
     ) where {T}
+    _check_mul_args(L, w, v)
     N = L.L.N
 
     isone(β) || lmul!(β, w)
@@ -157,6 +161,7 @@ SciMLOperators.has_adjoint(::NumberOperator) = true
 Base.adjoint(L::NumberOperator) = L
 
 function LinearAlgebra.mul!(w::AbstractVecOrMat, L::NumberOperator{T}, v::AbstractVecOrMat) where {T}
+    _check_mul_args(L, w, v)
     N, shift = L.N, L.shift
 
     fill!(w, zero(eltype(w)))
@@ -168,6 +173,7 @@ end
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::NumberOperator{T}, v::AbstractVecOrMat, α, β,
     ) where {T}
+    _check_mul_args(L, w, v)
     N, shift = L.N, L.shift
 
     @views w[1:N, :] .= α .* (real(T).(0:(N - 1)) .+ shift) .* v[1:N, :] .+ β .* w[1:N, :]
@@ -205,6 +211,7 @@ SciMLOperators.islinear(::DestroyPowerOperator) = true
 SciMLOperators.has_adjoint(::DestroyPowerOperator) = true
 
 function LinearAlgebra.mul!(w::AbstractVecOrMat, L::DestroyPowerOperator{T}, v::AbstractVecOrMat) where {T}
+    _check_mul_args(L, w, v)
     N, k = L.N, L.k
 
     fill!(w, zero(eltype(w)))
@@ -216,6 +223,7 @@ end
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::DestroyPowerOperator{T}, v::AbstractVecOrMat, α, β,
     ) where {T}
+    _check_mul_args(L, w, v)
     N, k = L.N, L.k
 
     isone(β) || lmul!(β, w)
@@ -232,6 +240,7 @@ const AdjointDestroyPowerOperator{T} = AdjointOperator{T, <:DestroyPowerOperator
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::AdjointOperator{T, <:DestroyPowerOperator{T}}, v::AbstractVecOrMat,
     ) where {T}
+    _check_mul_args(L, w, v)
     N, k = L.L.N, L.L.k
 
     fill!(w, zero(eltype(w)))
@@ -243,6 +252,7 @@ end
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::AdjointOperator{T, <:DestroyPowerOperator{T}}, v::AbstractVecOrMat, α, β,
     ) where {T}
+    _check_mul_args(L, w, v)
     N, k = L.L.N, L.L.k
 
     isone(β) || lmul!(β, w)
@@ -307,6 +317,7 @@ end
 # (â†)^k â^n maps v[j+n] → w[j+k] with coefficient coeff(j), for j = 1..N-max(k,n)
 
 function LinearAlgebra.mul!(w::AbstractVecOrMat, L::NormalOrderedOperator{T}, v::AbstractVecOrMat) where {T}
+    _check_mul_args(L, w, v)
     N, k, n = L.N, L.k, L.n
     len = N - max(k, n)
     fill!(w, zero(eltype(w)))
@@ -319,6 +330,7 @@ end
 function LinearAlgebra.mul!(
         w::AbstractVecOrMat, L::NormalOrderedOperator{T}, v::AbstractVecOrMat, α, β,
     ) where {T}
+    _check_mul_args(L, w, v)
     N, k, n = L.N, L.k, L.n
     len = N - max(k, n)
 

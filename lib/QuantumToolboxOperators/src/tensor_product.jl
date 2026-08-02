@@ -49,6 +49,21 @@ Julia array dimension `N - j + 1`:
   * physics mode `1` (outermost) → Julia dimension `N`, the most strided case, which requires a
     `permutedims!` there and back.
 
+# Acting on a matrix
+
+A matrix state is a batch of column states, so `mul!(W, L, V)` is `L` applied to each column of `V`
+— which is left multiplication `L * ρ` when `V` is a density matrix. The batch is a trailing axis
+that is never contracted and never permuted, so this costs no more than the columns themselves.
+
+The work buffers must be sized for the batch, so `cache_operator` has to be given a state of the
+shape you intend to apply `L` to: an operator cached against a vector cannot be applied to a
+matrix, and `mul!` throws rather than silently going wrong.
+
+Right multiplication `ρ * L` works too — SciMLOperators rewrites it as `adjoint(L' * ρ')`
+(`left.jl:7`), which lands back here. It is roughly 3× slower than `L * ρ` because the state it
+forwards is an `Adjoint`, whose `reshape` is a `ReshapedArray` rather than a shared-memory view,
+so `permutedims!` loses its fast path.
+
 # Constructor
 
     LocalTensorProductOperator(dims::Tuple, idx₁ => op₁, idx₂ => op₂, …)
@@ -139,7 +154,9 @@ SciMLOperators.getops(L::LocalTensorProductOperator) = L.ops
 Base.adjoint(L::LocalTensorProductOperator) =
     LocalTensorProductOperator(L.dims, L.indices, map(adjoint, L.ops), L.cache)
 
-Base.:*(L::LocalTensorProductOperator, v::AbstractVector) = mul!(similar(v, Base.promote_eltype(L, v)), L, v)
+Base.:*(L::LocalTensorProductOperator, v::AbstractVecOrMat) = mul!(similar(v, Base.promote_eltype(L, v)), L, v)
+
+SciMLOperators.isconvertible(::LocalTensorProductOperator) = false
 
 function Base.show(io::IO, L::LocalTensorProductOperator{T, M, N}) where {T, M, N}
     return print(io, "LocalTensorProductOperator{$T}(dims=$(L.dims), $M active of $N subsystems)")
@@ -168,43 +185,91 @@ SciMLOperators.iscached(L::LocalTensorProductOperator) =
 # take its buffer-free fast path.
 
 """
-    cache_self(L::LocalTensorProductOperator, v::AbstractVector)
+    cache_self(L::LocalTensorProductOperator, u::AbstractVecOrMat)
 
-Allocate `L`'s two work buffers, sized for `v`. Returns `L` unchanged for a single operator acting
+Allocate `L`'s two work buffers, sized for `u`. Returns `L` unchanged for a single operator acting
 on the last subsystem, which needs none; see [`LocalTensorProductOperator`](@ref).
+
+`u` may be a matrix — a batch of states, e.g. a density matrix — in which case the buffers are
+sized for the whole batch. An operator cached against a vector therefore cannot be applied to a
+matrix; `mul!` says so rather than silently going wrong.
 """
-function SciMLOperators.cache_self(L::LocalTensorProductOperator, v::AbstractVector)
+function SciMLOperators.cache_self(L::LocalTensorProductOperator, u::AbstractVecOrMat)
     _needs_cache(L) || return L
-    total = prod(L.dims)
-    return LocalTensorProductOperator(L.dims, L.indices, L.ops, (similar(v, total), similar(v, total)))
+    n = length(u)
+    return LocalTensorProductOperator(L.dims, L.indices, L.ops, (similar(u, n), similar(u, n)))
 end
 
 """
-    cache_internals(L::LocalTensorProductOperator, v::AbstractVector)
+    cache_internals(L::LocalTensorProductOperator, u::AbstractVecOrMat)
 
-Cache each sub-operator against a slice of `v` of that subsystem's dimension.
+Cache each sub-operator against a slice of `u` of that subsystem's dimension. A slice rather than a
+fresh array so that nothing is allocated: `cache_operator` uses its second argument only as a size
+and type prototype, and allocates its own buffers from it with `similar`. Linear indexing makes the
+same expression work whether `u` is a vector or a matrix.
 """
-function SciMLOperators.cache_internals(L::LocalTensorProductOperator{T, M, N}, v::AbstractVector) where {T, M, N}
+function SciMLOperators.cache_internals(L::LocalTensorProductOperator{T, M, N}, u::AbstractVecOrMat) where {T, M, N}
     cached_ops = ntuple(Val(M)) do j
         dk = L.dims[L.indices[j]]
-        cache_operator(L.ops[j], @view(v[1:dk]))
+        cache_operator(L.ops[j], @view(u[1:dk]))
     end
 
     return LocalTensorProductOperator(L.dims, L.indices, cached_ops, L.cache)
 end
 
+# The buffers are stored flat, so one cache serves both the vector and the matrix path. No error
+# path here: `_check_cache` has already established that the length matches, which keeps the return
+# type concrete — a `Union{Vector, SubArray}` here would propagate through the `iseven(j) ? buf : w`
+# ping-pong below and cost an allocation on every call.
+#
+# The vector case returns the buffer untouched: `reshape` allocates a fresh array header even when
+# it changes nothing, and this sits in the inner loop of every `sesolve` step.
+_work_buffer(L::LocalTensorProductOperator, k::Int, ::AbstractVector) = L.cache[k]
+_work_buffer(L::LocalTensorProductOperator, k::Int, v::AbstractMatrix) = reshape(L.cache[k], size(v))
+
+# Work buffers are sized for the state they were cached against (`cache_self`), so applying `L` to
+# a state of a different shape — the easy mistake being to cache with `ψ` and then apply to `ρ` —
+# has to be caught here. Without it the failure surfaces as a `reshape` `DimensionMismatch` deep in
+# `_apply_single_op_tensor_prod!`, which says nothing about the cache.
+function _check_cache(L::LocalTensorProductOperator, v::AbstractVecOrMat)
+    _needs_cache(L) || return nothing
+    iscached(L) || throw(ArgumentError("Operator is not cached. Call `cache_operator(L, v)` first."))
+    n = length(L.cache[1])
+    n == length(v) || throw(
+        ArgumentError(
+            "operator was cached for $n elements but the state has $(length(v)). Call " *
+                "`cache_operator(L, v)` with a state of the shape you intend to apply it to — " *
+                "caching against a vector is not enough to apply `L` to a matrix.",
+        ),
+    )
+    return nothing
+end
+
+_state_axes(L::LocalTensorProductOperator, ::AbstractVector) = reverse(L.dims)
+_state_axes(L::LocalTensorProductOperator, v::AbstractMatrix) = (reverse(L.dims)..., size(v, 2))
+
 # ─── 3-arg mul!: w = L * v ───────────────────────────────────────────────────
 
-function LinearAlgebra.mul!(w::AbstractVector, L::LocalTensorProductOperator{T, M, N}, v::AbstractVector) where {T, M, N}
-    dims_rev = reverse(L.dims)
+function LinearAlgebra.mul!(w::AbstractVector, L::LocalTensorProductOperator, v::AbstractVector)
+    _check_mul_args(L, w, v)
+    return _tensor_prod_mul!(w, L, v)
+end
+
+function LinearAlgebra.mul!(w::AbstractMatrix, L::LocalTensorProductOperator, v::AbstractMatrix)
+    _check_mul_args(L, w, v)
+    return _tensor_prod_mul!(w, L, v)
+end
+
+function _tensor_prod_mul!(w::AbstractVecOrMat, L::LocalTensorProductOperator{T, M, N}, v::AbstractVecOrMat) where {T, M, N}
+    dims_rev = _state_axes(L, v)
     ops = L.ops
 
     if _is_contiguous_single(L)
         return _apply_single_op_tensor_prod!(w, ops[1], v, dims_rev, 1, nothing)
     end
 
-    iscached(L) || throw(ArgumentError("Operator is not cached. Call `cache_operator(L, v)` first."))
-    buf = L.cache[1]
+    _check_cache(L, v)
+    buf = _work_buffer(L, 1, v)
 
     current_src = v
     for j in 1:M
@@ -229,7 +294,7 @@ end
 # Fast path: the target subsystem is already contiguous, so no permutation is needed and no
 # scratch buffer is required.
 function _apply_single_op_tensor_prod!(
-        dst::AbstractVector, op, src::AbstractVector,
+        dst::AbstractVecOrMat, op, src::AbstractVecOrMat,
         dims_rev::NTuple{N, Int}, idx::Int, ::Nothing,
     ) where {N}
     dk = dims_rev[idx]
@@ -240,8 +305,8 @@ function _apply_single_op_tensor_prod!(
 end
 
 function _apply_single_op_tensor_prod!(
-        dst::AbstractVector, op, src::AbstractVector,
-        dims_rev::NTuple{N, Int}, idx::Int, perm_buf::AbstractVector,
+        dst::AbstractVecOrMat, op, src::AbstractVecOrMat,
+        dims_rev::NTuple{N, Int}, idx::Int, perm_buf::AbstractVecOrMat,
     ) where {N}
     dk = dims_rev[idx]
     rest = length(src) ÷ dk
@@ -275,16 +340,23 @@ end
 
 # ─── 5-arg mul!: w = α * L * v + β * w ───────────────────────────────────────
 
-function LinearAlgebra.mul!(
-        w::AbstractVector,
+function LinearAlgebra.mul!(w::AbstractVector, L::LocalTensorProductOperator, v::AbstractVector, α, β)
+    _check_mul_args(L, w, v)
+    return _tensor_prod_mul!(w, L, v, α, β)
+end
+
+function LinearAlgebra.mul!(w::AbstractMatrix, L::LocalTensorProductOperator, v::AbstractMatrix, α, β)
+    _check_mul_args(L, w, v)
+    return _tensor_prod_mul!(w, L, v, α, β)
+end
+
+function _tensor_prod_mul!(
+        w::AbstractVecOrMat,
         L::LocalTensorProductOperator{T, M, N},
-        v::AbstractVector,
+        v::AbstractVecOrMat,
         α,
         β,
     ) where {T, M, N}
-    length(w) == prod(L.dims) || throw(DimensionMismatch("output vector has wrong length"))
-    length(v) == prod(L.dims) || throw(DimensionMismatch("input vector has wrong length"))
-
     # Fast exits for scalar coefficients
     if iszero(α)
         if iszero(β)
@@ -297,7 +369,7 @@ function LinearAlgebra.mul!(
 
     # If β == 0, compute w <- L*v first, then scale by α if needed
     if iszero(β)
-        mul!(w, L, v)
+        _tensor_prod_mul!(w, L, v)
         if !isone(α)
             rmul!(w, α)
         end
@@ -314,10 +386,10 @@ function LinearAlgebra.mul!(
     end
 
     # General case: compute tmp = L*v into an internal cached buffer, then w <- α*tmp + β*w
-    iscached(L) || throw(ArgumentError("Operator is not cached. Call `cache_operator(L, v)` first."))
-    buf2 = L.cache[2]
+    _check_cache(L, v)
+    buf2 = _work_buffer(L, 2, v)
 
-    mul!(buf2, L, v)
+    _tensor_prod_mul!(buf2, L, v)
     axpby!(α, buf2, β, w)
     return w
 end

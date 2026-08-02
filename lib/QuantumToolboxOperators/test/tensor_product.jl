@@ -87,6 +87,56 @@ end
     )
 end
 
+@testset "Matrix action never materializes the operator" begin
+    # `isconvertible` is `false`, so SciMLOperators' convert-based `mul!` fallback announces itself
+    # with a warning before materializing (`interface.jl:479`). A matrix state used to reach it
+    # silently; `@test_nowarn` is the direct assertion that it no longer does.
+    for p in (1, 3)                       # 1 = most strided (permutes), 3 = contiguous fast path
+        L = cache_operator(
+            LocalTensorProductOperator(DIMS3, p => _matop(DIMS3[p])),
+            randn(ComplexF64, prod(DIMS3), 3),
+        )
+        V = randn(ComplexF64, prod(DIMS3), 3)
+        W = randn(ComplexF64, size(V)...)
+
+        @test !SciMLOperators.isconvertible(L)
+        @test_nowarn mul!(similar(V), L, V)
+        @test_nowarn mul!(W, L, V, true, true)
+        @test_nowarn L * V
+    end
+end
+
+@testset "Right multiplication" begin
+    # `ρ * L` is serviced by SciMLOperators' `*(::AbstractVecOrMat, ::AbstractSciMLOperator)`
+    # (`left.jl:7`), which rewrites it as `adjoint(L' * ρ')` — so it needs `*` to accept a matrix,
+    # and the state it forwards is an `Adjoint`, not a plain `Matrix`.
+    A = _matop(DIMS3[1])
+    ref = _kron_ref(DIMS3, 1 => A.A)
+    ρ = randn(ComplexF64, prod(DIMS3), prod(DIMS3))
+    L = cache_operator(LocalTensorProductOperator(DIMS3, 1 => A), ρ)
+
+    @test ρ * L ≈ ρ * ref
+    @test L * ρ ≈ ref * ρ
+    @test ρ * ref ≉ ref * ρ      # the two products differ, so the check above is not vacuous
+end
+
+@testset "Matrix action does not allocate per call" begin
+    # `concretize(L)` here is a 1024×1024 matrix with no zero blocks — ~16 MiB, rebuilt on every
+    # call by the convert-based fallback this replaced. The state is 32 KiB, so the threshold sits
+    # two orders of magnitude below the regression and well above the real path's own overhead.
+    d = (32, 32)
+    V = randn(ComplexF64, prod(d), 2)
+    L = cache_operator(LocalTensorProductOperator(d, 1 => _matop(d[1]), 2 => _matop(d[2])), V)
+
+    W = similar(V)
+    mul!(W, L, V)                          # compile before measuring
+    @test (@allocated mul!(W, L, V)) < 100_000
+
+    W2 = copy(V)
+    mul!(W2, L, V, true, true)
+    @test (@allocated mul!(W2, L, V, true, true)) < 100_000
+end
+
 @testset "Cache contract" begin
     v = randn(ComplexF64, prod(DIMS3))
 
@@ -95,6 +145,17 @@ end
     @test !iscached(L)
     @test_throws ArgumentError mul!(similar(v), L, v)
     @test iscached(cache_operator(L, v))
+
+    # Work buffers are sized for the state they were cached against, so a vector-cached operator
+    # cannot be applied to a matrix. It must say so, not silently fall back to a materialized form.
+    V = randn(ComplexF64, prod(DIMS3), 3)
+    @test_throws ArgumentError mul!(similar(V), cache_operator(L, v), V)
+    @test mul!(similar(V), cache_operator(L, V), V) ≈ concretize(cache_operator(L, V)) * V
+
+    # Mismatched state shapes are rejected rather than reinterpreted.
+    Lc = cache_operator(L, V)
+    @test_throws DimensionMismatch mul!(randn(ComplexF64, prod(DIMS3), 2), Lc, V)
+    @test_throws DimensionMismatch mul!(similar(V), Lc, randn(ComplexF64, prod(DIMS3) + 1, 3))
 
     # Needs no cache: single operator on the last subsystem, contiguous in memory.
     A = _matop(DIMS3[3])
@@ -119,14 +180,15 @@ end
 end
 
 @testset "Type stability" begin
-    v = randn(ComplexF64, prod(DIMS4))
-    w = similar(v)
+    for state in (randn(ComplexF64, prod(DIMS4)), randn(ComplexF64, prod(DIMS4), 3))
+        u = similar(state)
 
-    L = cache_operator(LocalTensorProductOperator(DIMS4, 1 => _matop(DIMS4[1]), 3 => _matop(DIMS4[3])), v)
-    @test (@inferred mul!(w, L, v)) === w
-    @test (@inferred mul!(w, L, v, 1.0, 0.0)) === w
+        L = cache_operator(LocalTensorProductOperator(DIMS4, 1 => _matop(DIMS4[1]), 3 => _matop(DIMS4[3])), state)
+        @test (@inferred mul!(u, L, state)) === u
+        @test (@inferred mul!(u, L, state, 1.0, 0.0)) === u
 
-    L_fast = LocalTensorProductOperator(DIMS4, 4 => _matop(DIMS4[4]))
-    @test (@inferred mul!(w, L_fast, v)) === w
-    @test (@inferred mul!(w, L_fast, v, 1.0, 1.0)) === w
+        L_fast = LocalTensorProductOperator(DIMS4, 4 => _matop(DIMS4[4]))
+        @test (@inferred mul!(u, L_fast, state)) === u
+        @test (@inferred mul!(u, L_fast, state, 1.0, 1.0)) === u
+    end
 end

@@ -11,7 +11,7 @@ measurement, recorded here so the document stands on its own; §4.1 gives the ha
 
 | | |
 |---|---|
-| **Works today** | `sesolve`, `mesolve` without `c_ops`, `expect`/`dot`, CPU + CUDA + Reactant/XLA, tensor products via `LocalTensorProductOperator` |
+| **Works today** | `sesolve`, `mesolve` without `c_ops`, `expect`/`dot`, CPU + CUDA + Reactant/XLA, tensor products via `LocalTensorProductOperator`, vector *and* matrix (density-matrix) states |
 | **Works, with caveats** | Composite single-mode operators are still slower than sparse on CPU; multi-mode operators are slower than sparse on CPU and much slower on CUDA — but far smaller in memory, and the fastest of all under XLA |
 | **Blocked** | `mesolve` with `c_ops`, all stochastic solvers, `steadystate` (except the ODE solver), `spectrum`, `eigenstates` — every one of them for the same underlying reason: there is no lazy superoperator |
 
@@ -68,6 +68,21 @@ every branch in `mul!`.
 **Caching.** `cache_operator` is required except for the one configuration that genuinely needs no
 buffers: a single operator acting on the last subsystem. `mul!` throws a clear `ArgumentError`
 otherwise.
+
+**Matrix states.** A matrix is a batch of column states — left multiplication ``\hat{O}\hat{ρ}``
+when the columns are a density matrix. Reading it as `reshape(v, reverse(dims)..., ncols)` appends
+a batch axis that is never contracted and never permuted, so the existing `perm`/`inv_perm`
+formulas already handle it: both map every axis after the target to itself. The batch axis has to
+be a real axis of the reshape rather than folded into the trailing `rest` extent, because
+`permutedims!` needs the true axis lengths. Work buffers must therefore be sized for the whole
+batch, so `cache_operator` has to be given a state of the shape `L` will be applied to; a
+vector-cached operator applied to a matrix throws rather than reallocating silently.
+
+Measured scaling against the single-column cost (min of 30, `ComplexF64`, 1 BLAS thread): 0.8–1.3×
+of ideal linear across 12–16 site chains and `d = 30` cavity chains, at 4 and 16 columns. Batching
+beats a per-column loop wherever the target axis is strided — by 2.5× for a 16-site chain with the
+operator on site 1 — because one `permutedims!` over the batch replaces `ncols` of them. The vector
+path is untouched: same 1 472 B and same 530 µs on the 16-site chain as before matrices existed.
 
 At least one operator is required. An identity on the whole space is
 `SciMLOperators.IdentityOperator(prod(dims))`, so there is no reason for this type to represent it.
@@ -277,6 +292,22 @@ tensor products are currently a memory play and an XLA play, not a CPU/CUDA thro
   * `size(L, d)` was wrong or threw for `d ≥ 3`.
   * `isconstant` was unconditionally `true` for `LocalTensorProductOperator` because it exposed no
     `getops`, which would silently change ODE solver stepping for a time-dependent sub-operator.
+  * **A wrongly sized state was accepted in silence.** No operator here checked its arguments, and
+    `SciMLOperators` has no generic check to inherit — each concrete operator asserts its own sizes
+    (`block.jl`, `basic.jl`), and `FunctionOperator` keeps a private `_sizecheck`. Because these
+    operators address the state through views like `v[2:N, :]`, `mul!(w, DestroyOperator(10), v)`
+    with a 20-element `v` returned a plausible answer computed from the first 10 entries instead of
+    throwing. `_check_mul_args` in `src/common.jl` is now called by every `mul!`.
+  * **`LocalTensorProductOperator` applied to a matrix silently materialized itself.** Its `mul!`
+    was typed `::AbstractVector`, so a matrix state fell through to SciMLOperators' convert-based
+    fallback (`interface.jl:479`), which is `mul!(w, concretize(L), v)` — the full Kronecker
+    product, rebuilt on *every call*. The answer was right and nothing warned, because
+    `isconvertible(L)` defaulted to `true`. Measured on a 16-site chain (dim 65 536) with a
+    4-column state: 4.01 MiB allocated per `mul!`, against 1 472 B for the vector path. At the
+    18-spin size of §4.4 that is a 70 MiB matrix per call. Replaced by a real batched path (§2.3),
+    which brings the same case to 1 520 B and leaves the vector path byte-for-byte unchanged;
+    `isconvertible` is now `false`, as it is for `SciMLOperators.TensorProductOperator`, so any
+    fallback that does still fire warns instead of materializing in silence.
 
 ### 5.2 Still open
 
@@ -290,7 +321,12 @@ tensor products are currently a memory play and an XLA play, not a CPU/CUDA thro
     buffers to the device, but a `MatrixOperator` wrapping a host `Matrix` stays on the host and
     `mul!` fails on a GPU state. Build such sub-operators with device arrays directly. Bosonic
     operators are immune — they store only a dimension.
-  * **`LocalTensorProductOperator` acts on `AbstractVector` only**, not `AbstractMatrix`.
+  * **Right multiplication `ρ̂ Ô` is ~3× slower than `Ô ρ̂` for `LocalTensorProductOperator`.**
+    SciMLOperators rewrites `ρ * L` as `adjoint(L' * ρ')` (`left.jl:7`), so the state that reaches
+    `mul!` is an `Adjoint`. `reshape` of one is a `ReshapedArray` rather than a shared-memory view,
+    which costs `permutedims!` its fast path — 743 ms against 254 ms for a 12-spin chain with a
+    full density matrix. It is correct and still matrix-free; only the layout is unfavourable.
+    Bosonic operators are unaffected: they never permute.
   * **An `M`-term sum allocates `2M` state vectors.** `AddedOperator` evaluates its terms strictly
     one at a time, so one buffer pair would do. Rebuilding the terms by hand against a single shared
     cache is worth up to ~17× memory (§4.4), but it is not thread-safe and is not something a user
@@ -326,9 +362,12 @@ Note that coefficient *precomputation* was tried and reverted before (commits `9
 **P2 — features.**
 
   1. Reshape-based lazy `_spre`/`_spost` in QuantumToolbox — the single unlock of §3.3.
+     `LocalTensorProductOperator` now acts on matrices (§2.3), so the ``ρ ↦ Aρ`` half of this has a
+     matrix-free path to build on for every operator type here.
   2. `cu(::QuantumObjectEvolution)`, plus `Adapt.adapt_structure` for these operator types.
   3. Spin/qubit matrix-free operator types.
-  4. `AbstractMatrix` action for `LocalTensorProductOperator`.
+  4. An `Adjoint`-aware path for `LocalTensorProductOperator`, so that right multiplication — and
+     hence `_spost` — is not 3× slower than left. See §5.2.
 
 **P3 — ecosystem.** Wiring the subpackage into the repository, deliberately deferred because this
 branch is behind `upstream/main` and `upstream/lib/core` already restructures `src/` into
