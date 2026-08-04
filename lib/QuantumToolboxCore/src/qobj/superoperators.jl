@@ -251,6 +251,8 @@ function liouvillian(
             get_typename_wrapper(H)(_liouvillian(H.data, makeVal(assume_hermitian)), SuperOperator(), Dimensions(Lspace, Lspace))
         elseif issuper(H)
             H
+        else
+            throw(ArgumentError("A matrix-form SuperOperator cannot be converted to vector form."))
         end
 
         !isnothing(c_ops) && return L + _sum_lindblad_dissipators(c_ops)
