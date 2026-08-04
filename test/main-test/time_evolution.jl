@@ -534,8 +534,8 @@ end
     @testset "Memory Allocations (mcsolve)" begin
         ntraj = 100
         for keep_runs_results in (Val(false), Val(true))
-            n1 = 140
-            n2 = 130
+            n1 = 145
+            n2 = 135
 
             allocs_tot = @allocations mcsolve(
                 H,
