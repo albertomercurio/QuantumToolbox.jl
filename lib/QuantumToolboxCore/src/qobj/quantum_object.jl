@@ -176,14 +176,17 @@ SparseArrays.dropzeros(A::QuantumObject) = QuantumObject(dropzeros(A.data), A.ty
 SparseArrays.dropzeros!(A::QuantumObject) = (dropzeros!(A.data); return A)
 
 @doc raw"""
-    SciMLOperators.cached_operator(L::AbstractQuantumObject, u)
+    SciMLOperators.cache_operator(L::AbstractQuantumObject, u)
 
-Allocate caches for [`AbstractQuantumObject`](@ref) `L` for in-place evaluation with `u`-like input vectors.
+Allocate caches for in-place evaluation of [`AbstractQuantumObject`](@ref) `L` with a state shaped like `u`.
 
-Here, `u` can be in either the following types:
-- `AbstractVector`
+Here, `u` can be one of the following types:
+- `AbstractVector` or `AbstractMatrix`
 - [`Ket`](@ref)-type [`QuantumObject`](@ref) (if `L` is an [`Operator`](@ref))
 - [`OperatorKet`](@ref)-type [`QuantumObject`](@ref) (if `L` is a [`SuperOperator`](@ref))
+- [`Operator`](@ref)-type [`QuantumObject`](@ref) (if `L` is a [`SuperOperatorMatrixForm`](@ref))
+
+[`mesolve`](@ref) manages this cache automatically. Calling `cache_operator` directly is useful when repeatedly applying a matrix-form superoperator to a density matrix outside a solver.
 """
 SciMLOperators.cache_operator(
     L::AbstractQuantumObject{OpType},
@@ -208,10 +211,6 @@ function SciMLOperators.cache_operator(
             throw(ArgumentError("The input state `u` must be an Operator if `L` is a SuperOperatorMatrixForm in matrix form."))
         end
     end
-
-    # (isoper(L) && isket(u)) || throw(ArgumentError("The input state `u` must be a Ket if `L` is an Operator."))
-    # (issuper(L) && isoperket(u)) || throw(ArgumentError("The input state `u` must be an OperatorKet if `L` is a SuperOperator."))
-    # (issupermatform(L) && isoper(u)) || throw(ArgumentError("The input state `u` must be an Operator if `L` is a SuperOperatorMatrixForm in matrix form."))
 
     check_mul_dimensions(L, u)
     return cache_operator(L, u.data)

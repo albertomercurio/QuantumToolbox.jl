@@ -253,6 +253,13 @@ end
     @test sol_me_mat2.expect[1, TESetup.saveat_idxs] ≈ expect(e_ops[1], sol_me_mat2.states) atol = 1.0e-6
     @test sol_me_mat2.expect[1, :] ≈ sol_me.expect[1, :] atol = 1.0e-6
 
+    @testset "Pure-dissipator Liouvillian matrix form" begin
+        L_diss_mat = liouvillian(nothing, c_ops; matrix_form = Val(true))
+        L_diss_mat_vector = liouvillian(nothing, collect(c_ops); matrix_form = Val(true))
+        @test L_diss_mat.type isa SuperOperatorMatrixForm
+        @test L_diss_mat_vector.type isa SuperOperatorMatrixForm
+    end
+
     sol_me_string = sprint((t, s) -> show(t, "text/plain", s), sol_me)
     @test sol_me_string ==
         "Solution of time evolution\n" *
@@ -303,6 +310,7 @@ end
         ad_t = QobjEvo(a', coef)
         @inferred mesolveProblem(H, ψ0, tlist, c_ops, e_ops = e_ops, progress_bar = Val(false))
         @inferred mesolveProblem(H, ψ0, tlist, c_ops, e_ops = e_ops, progress_bar = Val(false), matrix_form = Val(true))
+        @inferred liouvillian(nothing, c_ops; matrix_form = Val(true))
         @inferred mesolveProblem(H, ψ0, [0, 10], c_ops, e_ops = e_ops, progress_bar = Val(false))
         @inferred mesolveProblem(H, TESetup.ψ0_int, tlist, c_ops, e_ops = e_ops, progress_bar = Val(false))
         @inferred mesolve(H, ψ0, tlist, c_ops, e_ops = e_ops, progress_bar = Val(true)) # also test progress bar

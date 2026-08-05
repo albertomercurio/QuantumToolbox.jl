@@ -82,7 +82,9 @@ where
 - `params`: Parameters to pass to the solver. This argument is usually expressed as a `NamedTuple` or `AbstractVector` of parameters. For more advanced usage, any custom struct can be used.
 - `progress_bar`: Whether to show the progress bar. Using non-`Val` types might lead to type instabilities.
 - `inplace`: Whether to use the inplace version of the ODEProblem. The default is `Val(true)`. It is recommended to use `Val(true)` for better performance, but it is sometimes necessary to use `Val(false)`, for example when performing automatic differentiation using [Zygote.jl](https://github.com/FluxML/Zygote.jl).
-- `matrix_form`: Whether to use the matrix form of the Liouvillian. The default is `Val(false)`. Using `Val(true)` can lead to better performance and less memory usage when the system size is large.
+- `matrix_form`: If `Val(true)`, keep the density matrix as an ``N \times N`` [`Operator`](@ref) and apply the Liouvillian lazily instead of materializing an ``N^2 \times N^2`` matrix.
+  This is most useful for large Hilbert spaces, sparse operators, GPU calculations, and poorly sparse Liouvillians. For small or dense systems, the default vectorized form can be faster.
+  Matrix form accepts a [`Ket`](@ref) or [`Operator`](@ref) initial state and returns [`Operator`](@ref) states. Prefer `Val(true)` or `Val(false)` over `Bool` values when type stability matters.
 - `kwargs`: The keyword arguments for the ODEProblem.
 
 # Notes
@@ -182,7 +184,9 @@ where
 - `params`: Parameters to pass to the solver. This argument is usually expressed as a `NamedTuple` or `AbstractVector` of parameters. For more advanced usage, any custom struct can be used.
 - `progress_bar`: Whether to show the progress bar. Using non-`Val` types might lead to type instabilities.
 - `inplace`: Whether to use the inplace version of the ODEProblem. The default is `Val(true)`. It is recommended to use `Val(true)` for better performance, but it is sometimes necessary to use `Val(false)`, for example when performing automatic differentiation using [Zygote.jl](https://github.com/FluxML/Zygote.jl).
-- `matrix_form`: Whether to use the matrix form of the Liouvillian. The default is `Val(false)`. Using `Val(true)` can lead to better performance and less memory usage when the system size is large.
+- `matrix_form`: If `Val(true)`, keep the density matrix as an ``N \times N`` [`Operator`](@ref) and apply the Liouvillian lazily instead of materializing an ``N^2 \times N^2`` matrix.
+  This is most useful for large Hilbert spaces, sparse operators, GPU calculations, and poorly sparse Liouvillians. For small or dense systems, the default vectorized form can be faster.
+  Matrix form accepts a [`Ket`](@ref) or [`Operator`](@ref) initial state and returns [`Operator`](@ref) states. Prefer `Val(true)` or `Val(false)` over `Bool` values when type stability matters.
 - `kwargs`: The keyword arguments for the ODEProblem.
 
 # Notes
@@ -288,7 +292,9 @@ for each combination in the ensemble.
 - `e_ops`: List of operators for which to calculate expectation values. It can be either a `Vector` or a `Tuple`.
 - `params`: A `Tuple` of parameter sets. Each element should be an `AbstractVector` representing the sweep range for that parameter. The function will solve for all combinations of initial states and parameter sets.
 - `progress_bar`: Whether to show the progress bar. Using non-`Val` types might lead to type instabilities.
-- `matrix_form`: Whether to use the matrix form of the Liouvillian. The default is `Val(false)`. Using `Val(true)` can lead to better performance and less memory usage when the system size is large.
+- `matrix_form`: If `Val(true)`, keep each density matrix as an ``N \times N`` [`Operator`](@ref) and apply the Liouvillian lazily instead of materializing an ``N^2 \times N^2`` matrix.
+  This is most useful for large Hilbert spaces, sparse operators, GPU calculations, and poorly sparse Liouvillians. For small or dense systems, the default vectorized form can be faster.
+  Matrix form accepts [`Ket`](@ref) or [`Operator`](@ref) initial states and returns [`Operator`](@ref) states. Prefer `Val(true)` or `Val(false)` over `Bool` values when type stability matters.
 - `kwargs`: The keyword arguments for the ODEProblem.
 
 # Notes

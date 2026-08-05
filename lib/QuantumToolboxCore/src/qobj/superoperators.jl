@@ -77,7 +77,7 @@ Returns the [`SuperOperator`](@ref) form of `A` acting on the left of the densit
 - If `matrix_form = Val(false)` (default), the output is a [`SuperOperator`](@ref), acting on **vectorized** density matrices.
 - If `matrix_form = Val(true)`, the output is a [`SuperOperatorMatrixForm`](@ref), acting on **non-vectorized** density matrices.
 
-Since the density matrix is vectorized in [`OperatorKet`](@ref) form: ``|\hat{\rho}\rangle\!\rangle``, this [`SuperOperator`](@ref) is always a matrix ``\hat{\mathbb{1}} \otimes \hat{A}``, namely 
+In the default vectorized form, the density matrix is an [`OperatorKet`](@ref), ``|\hat{\rho}\rangle\!\rangle``, and left multiplication is represented by the matrix ``\hat{\mathbb{1}} \otimes \hat{A}``:
 
 ```math
 \mathcal{O} \left(\hat{A}\right) \left[ \hat{\rho} \right] = \hat{\mathbb{1}} \otimes \hat{A} ~ |\hat{\rho}\rangle\!\rangle
@@ -102,7 +102,7 @@ Returns the [`SuperOperator`](@ref) form of `B` acting on the right of the densi
 - If `matrix_form = Val(false)` (default), the output is a [`SuperOperator`](@ref), acting on **vectorized** density matrices.
 - If `matrix_form = Val(true)`, the output is a [`SuperOperatorMatrixForm`](@ref), acting on **non-vectorized** density matrices.
 
-Since the density matrix is vectorized in [`OperatorKet`](@ref) form: ``|\hat{\rho}\rangle\!\rangle``, this [`SuperOperator`](@ref) is always a matrix ``\hat{B}^T \otimes \hat{\mathbb{1}}``, namely
+In the default vectorized form, the density matrix is an [`OperatorKet`](@ref), ``|\hat{\rho}\rangle\!\rangle``, and right multiplication is represented by the matrix ``\hat{B}^T \otimes \hat{\mathbb{1}}``:
 
 ```math
 \mathcal{O} \left(\hat{B}\right) \left[ \hat{\rho} \right] = \hat{B}^T \otimes \hat{\mathbb{1}} ~ |\hat{\rho}\rangle\!\rangle
@@ -127,7 +127,7 @@ Returns the [`SuperOperator`](@ref) form of `A` and `B` acting on the left and r
 - If `matrix_form = Val(false)` (default), the output is a [`SuperOperator`](@ref), acting on **vectorized** density matrices.
 - If `matrix_form = Val(true)`, the output is a [`SuperOperatorMatrixForm`](@ref), acting on **non-vectorized** density matrices.
 
-Since the density matrix is vectorized in [`OperatorKet`](@ref) form: ``|\hat{\rho}\rangle\!\rangle``, this [`SuperOperator`](@ref) is always a matrix ``\hat{B}^T \otimes \hat{A}``, namely
+In the default vectorized form, the density matrix is an [`OperatorKet`](@ref), ``|\hat{\rho}\rangle\!\rangle``, and the combined action is represented by the matrix ``\hat{B}^T \otimes \hat{A}``:
 
 ```math
 \mathcal{O} \left(\hat{A}, \hat{B}\right) \left[ \hat{\rho} \right] = \hat{B}^T \otimes \hat{A} ~ |\hat{\rho}\rangle\!\rangle = \textrm{spre}(\hat{A}) * \textrm{spost}(\hat{B}) ~ |\hat{\rho}\rangle\!\rangle
@@ -180,13 +180,14 @@ lindblad_dissipator(O::AbstractQuantumObject{SuperOperator}; kwargs...) = O
 
 @doc raw"""
     liouvillian(
-        H::AbstractQuantumObject,
+        H::Union{AbstractQuantumObject,Nothing},
         c_ops::Union{Nothing,AbstractVector,Tuple}=nothing;
         assume_hermitian::Union{Bool,Val} = Val(true),
         matrix_form::Union{Bool, Val} = Val(false)
     )
 
 Construct the Liouvillian [`SuperOperator`](@ref) for a system Hamiltonian ``\hat{H}`` and a set of collapse operators ``\{\hat{C}_n\}_n``.
+Pass `H = nothing` to construct a purely dissipative Liouvillian from `c_ops`.
 
 By default, when the Hamiltonian `H` is assumed to be Hermitian [`assume_hermitian = Val(true)` or `true`], the Liouvillian [`SuperOperator`](@ref) is defined as :
 
@@ -210,10 +211,14 @@ The `matrix_form` keyword argument controls the output format of the superoperat
 - If `matrix_form = Val(false)` (default), the output is a [`SuperOperator`](@ref), acting on **vectorized** density matrices.
 - If `matrix_form = Val(true)`, the output is a [`SuperOperatorMatrixForm`](@ref), acting on **non-vectorized** density matrices.
 
+Matrix form keeps an ``N \times N`` density matrix and represents left/right actions lazily instead of materializing the full ``N^2 \times N^2`` Liouville-space matrix. It is most useful for large Hilbert spaces, sparse operators, GPU calculations, and poorly sparse Liouvillians. For small or dense systems, the default vectorized form can be faster because it has less operator-composition overhead.
+
+See [Matrix-form evolution](@ref doc-TE:Matrix-form-evolution) for a complete solver example.
+
 See also [`spre`](@ref), [`spost`](@ref), and [`lindblad_dissipator`](@ref).
 
 !!! warning "Beware of type-stability!"
-    If you want to keep type stability, it is recommended to use `assume_hermitian = Val(true)` instead of `assume_hermitian = true`. See [this link](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-value-type) and the [related Section](@ref doc:Type-Stability) about type stability for more details.
+    If you want to keep type stability, use `Val` values for `assume_hermitian` and `matrix_form`, for example `assume_hermitian = Val(true)` and `matrix_form = Val(false)`. See [this link](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-value-type) and the [related Section](@ref doc:Type-Stability) for more details.
 """
 function liouvillian(
         H::AbstractQuantumObject{OpType},
@@ -261,22 +266,31 @@ function liouvillian(
     end
 end
 
-liouvillian(H::Nothing, c_ops::AbstractVecOrTuple; kwargs...) = _sum_lindblad_dissipators(c_ops)
+liouvillian(
+    H::Nothing,
+    c_ops::AbstractVecOrTuple;
+    matrix_form::Union{Bool, Val} = Val(false),
+    kwargs...,
+) = _sum_lindblad_dissipators(c_ops, makeVal(matrix_form))
 liouvillian(H::Nothing, c_ops::Nothing; kwargs...) = 0
 liouvillian(H::AbstractQuantumObject{<:SuperOperatorType}; kwargs...) = H
 
-_sum_lindblad_dissipators(c_ops::Nothing) = 0
-_sum_lindblad_dissipators(c_ops::AbstractVector) = sum(op -> lindblad_dissipator(op), c_ops; init = 0)
+_sum_lindblad_dissipators(c_ops) = _sum_lindblad_dissipators(c_ops, Val(false))
+_sum_lindblad_dissipators(c_ops::Nothing, matrix_form::Val) = 0
+function _sum_lindblad_dissipators(c_ops::AbstractVector, matrix_form::Val)
+    isempty(c_ops) && return 0
+    return mapreduce(op -> lindblad_dissipator(op; matrix_form = matrix_form), +, c_ops)
+end
 
 # Help the compiler to unroll the sum at compile time
-@generated function _sum_lindblad_dissipators(c_ops::Tuple)
+@generated function _sum_lindblad_dissipators(c_ops::Tuple, matrix_form::Val)
     N = length(c_ops.parameters)
     if N == 0
         return :(0)
     end
-    ex = :(lindblad_dissipator(c_ops[1]))
+    ex = :(lindblad_dissipator(c_ops[1]; matrix_form = matrix_form))
     for i in 2:N
-        ex = :($ex + lindblad_dissipator(c_ops[$i]))
+        ex = :($ex + lindblad_dissipator(c_ops[$i]; matrix_form = matrix_form))
     end
     return ex
 end

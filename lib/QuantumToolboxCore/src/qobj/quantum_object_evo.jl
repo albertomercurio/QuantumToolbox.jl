@@ -435,7 +435,7 @@ Apply the time-dependent [`QuantumObjectEvolution`](@ref) object `A` to the inpu
 
 # Arguments
 - `ψout::QuantumObject`: The output state. It must have the same type as `ψin`.
-- `ψin::QuantumObject`: The input state. It must be either a [`Ket`](@ref) or a [`OperatorKet`](@ref).
+- `ψin::QuantumObject`: The input state. It must be a [`Ket`](@ref) for an [`Operator`](@ref), an [`OperatorKet`](@ref) for a vectorized [`SuperOperator`](@ref), or an [`Operator`](@ref) density matrix for a [`SuperOperatorMatrixForm`](@ref).
 - `p`: The parameters of the time-dependent coefficients.
 - `t`: The time at which the coefficients are evaluated.
 
@@ -479,12 +479,18 @@ function (A::QuantumObjectEvolution)(
         p,
         t,
     ) where {QobjType <: Union{Ket, Operator, OperatorKet}}
-    if isoper(A) && isoperket(ψin)
+    if isoper(A) && !isket(ψin)
         throw(ArgumentError("The input state must be a Ket if the QuantumObjectEvolution object is an Operator."))
-    elseif issuper(A) && isket(ψin)
+    elseif issuper(A) && !isoperket(ψin)
         throw(
             ArgumentError(
                 "The input state must be an OperatorKet if the QuantumObjectEvolution object is a SuperOperator.",
+            ),
+        )
+    elseif issupermatform(A) && !isoper(ψin)
+        throw(
+            ArgumentError(
+                "The input state must be an Operator if the QuantumObjectEvolution object is a SuperOperatorMatrixForm.",
             ),
         )
     end

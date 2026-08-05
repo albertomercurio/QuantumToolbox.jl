@@ -22,12 +22,14 @@ Build the generalized Liouvillian for a system coupled to multiple bosonic baths
 - `N_trunc::Union{Int,Nothing}`: If provided, truncate the eigenbasis to the first `N_trunc` levels; otherwise use the full dimension of `H`.
 - `tol::Real`: Tolerance passed to sparsification utilities when constructing the filters and dissipators.
 - `σ_filter::Union{Nothing,Real}`: Width of the Gaussian frequency filter. If `nothing`, filtering is disabled.
-- `matrix_form::Union{Bool,Val}`: If `Val(true)`, return the Liouvillian in matrix form (`SuperOperatorMatrixForm`); otherwise return the vectorized `SuperOperator`.
+- `matrix_form::Union{Bool,Val}`: If `Val(true)`, return a [`SuperOperatorMatrixForm`](@ref) that acts lazily on a non-vectorized density matrix; otherwise return the vectorized [`SuperOperator`](@ref). Matrix form is especially useful here when the nonsecular Liouvillian would be poorly sparse and expensive to materialize. It currently requires `σ_filter = nothing`.
+
+For small systems, the default vectorized representation can be faster because it has less operator-composition overhead. Prefer `Val(true)` or `Val(false)` over `Bool` values when type stability matters.
 
 # Returns
 - `E`: Eigenenergies of `H` (truncated if `N_trunc` is provided).
 - `U`: Eigenvectors of `H` as a [`QuantumObject`](@ref) mapping to the truncated basis.
-- `L`: Generalized Liouvillian [`SuperOperator`](@ref) including the frequency-filtered dissipators.
+- `L`: Generalized Liouvillian, returned as a [`SuperOperator`](@ref) or [`SuperOperatorMatrixForm`](@ref) according to `matrix_form`.
 
 # References
 - [Settineri2018](@cite)
