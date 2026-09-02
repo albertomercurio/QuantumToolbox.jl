@@ -114,7 +114,13 @@ Furthermore, `QuantumToolbox` solves the master equation in the [`SuperOperator`
 
 By default, `QuantumToolbox` vectorizes an ``N \times N`` density matrix into a vector of length ``N^2`` and represents its Liouvillian as an ``N^2 \times N^2`` matrix. With `matrix_form = Val(true)`, the density matrix remains an [`Operator`](@ref), while lazy left- and right-multiplication operators apply terms such as ``A\rho``, ``\rho B``, and ``A\rho B`` without materializing their Kronecker products.
 
-Matrix form is most useful when the explicit Liouville-space matrix is the memory or performance bottleneck—for example, for large Hilbert spaces, sparse many-body operators, GPU calculations, or [`liouvillian_dressed_nonsecular`](@ref), whose vectorized representation can be poorly sparse. For small or dense systems, the default vectorized form can be faster because it has less operator-composition overhead. Keep the default when an algorithm requires the explicit Liouville-space matrix.
+This approach can be more memory-efficient and faster when:
+
+- the Hilbert-space dimension is moderate to large;
+- the Hamiltonian and collapse operators are relatively dense; or
+- memory is constrained, since matrix form avoids storing the full ``N^2 \times N^2`` Liouvillian.
+
+Matrix form can also be useful for sparse many-body operators, GPU calculations, or [`liouvillian_dressed_nonsecular`](@ref), whose vectorized representation can be poorly sparse. For small systems, the default vectorized form can still be faster because it has less operator-composition overhead. Keep the default when an algorithm requires the explicit Liouville-space matrix.
 
 Enable matrix form directly in [`mesolve`](@ref):
 
