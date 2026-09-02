@@ -186,7 +186,7 @@ Here, `u` can be one of the following types:
 - [`OperatorKet`](@ref)-type [`QuantumObject`](@ref) (if `L` is a [`SuperOperator`](@ref))
 - [`Operator`](@ref)-type [`QuantumObject`](@ref) (if `L` is a [`SuperOperatorMatrixForm`](@ref))
 
-[`mesolve`](@ref) manages this cache automatically. Calling `cache_operator` directly is useful when repeatedly applying a matrix-form superoperator to a density matrix outside a solver.
+[`QuantumToolbox.mesolve`](@ref) manages this cache automatically. Calling `cache_operator` directly is useful when repeatedly applying a matrix-form superoperator to a density matrix outside a solver.
 """
 SciMLOperators.cache_operator(
     L::AbstractQuantumObject{OpType},

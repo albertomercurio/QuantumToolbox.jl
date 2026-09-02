@@ -66,7 +66,7 @@ Constructor representing a superoperator ``\hat{\mathcal{O}}`` acting directly o
 
 Unlike [`SuperOperator`](@ref), this representation keeps a density matrix for an ``N``-dimensional Hilbert space as an ``N \times N`` [`Operator`](@ref) and uses lazy left/right actions instead of materializing an ``N^2 \times N^2`` Kronecker-product matrix. This can substantially reduce memory use for large Hilbert spaces, sparse operators, GPU calculations, and Liouvillians whose vectorized representation is poorly sparse. For small systems, the default vectorized representation can still be faster because it has less operator-composition overhead.
 
-Matrix form can be selected with `matrix_form = Val(true)` in [`mesolve`](@ref), [`liouvillian`](@ref), [`lindblad_dissipator`](@ref), [`spre`](@ref), [`spost`](@ref), and [`sprepost`](@ref). A matrix-form superoperator acts on an [`Operator`](@ref), not an [`OperatorKet`](@ref).
+Matrix form can be selected with `matrix_form = Val(true)` in [`QuantumToolbox.mesolve`](@ref), [`liouvillian`](@ref), [`lindblad_dissipator`](@ref), [`spre`](@ref), [`spost`](@ref), and [`sprepost`](@ref). A matrix-form superoperator acts on an [`Operator`](@ref), not an [`OperatorKet`](@ref).
 """
 struct SuperOperatorMatrixForm <: SuperOperatorType end
 
