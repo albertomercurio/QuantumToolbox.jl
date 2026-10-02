@@ -179,6 +179,7 @@ function _get_save_callback(cb::CallbackSet, method::Type{SF}) where {SF <: Abst
     cbs_discrete = cb.discrete_callbacks
     if length(cbs_discrete) > 0
         idx = _get_save_callback_idx(cb, method)
+        idx > length(cbs_discrete) && return nothing
         _cb = cb.discrete_callbacks[idx]
         return _get_save_callback(_cb, method)
     else

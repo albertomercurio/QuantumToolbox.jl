@@ -1,11 +1,11 @@
 export mcsolveProblem, mcsolveEnsembleProblem, mcsolve
 export ContinuousLindbladJumpCallback, DiscreteLindbladJumpCallback
 
-function _mcsolve_prob_func(prob, ctx, tlist; kwargs...)
+function _mcsolve_prob_func(prob, ctx, tlist; u0 = prob.u0, p = prob.p, kwargs...)
     f = _copy_for_trajectory(prob.f.f)
     cb = _mcsolve_initialize_callbacks(prob, tlist, ctx.rng)
 
-    return remake(prob, f = f, callback = cb)
+    return remake(prob, f = f, u0 = u0, p = p, callback = cb)
 end
 
 # Standard output function

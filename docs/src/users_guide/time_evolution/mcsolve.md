@@ -132,3 +132,45 @@ sol_parallel = mcsolve(H, ψ0, tlist, c_ops, e_ops=e_ops, ensemblealg=EnsembleTh
 
 !!! tip "Parallelization on a Cluster"
     See the section [Intensive parallelization on a Cluster](@ref doc:Intensive-parallelization-on-a-Cluster) for more details.
+
+## [Sweeping initial states and parameters](@id doc-TE:Monte-Carlo-parameter-sweeps)
+
+Use [`mcsolve_map`](@ref) to solve every combination of initial states and parameter
+values. It schedules all trajectories and sweep points in a single SciML
+`EnsembleProblem`, so the same interface supports threads, distributed workers,
+and `EnsembleSplitThreads()` on a cluster. `ntraj` specifies the number of
+trajectories **for each combination**.
+
+```@example mcsolve
+H_sweep = QobjEvo(sigmaz() / 2, (p, t) -> p[1])
+c_sweep = (QobjEvo(sigmam(), (p, t) -> sqrt(p[2])),)
+initial_states = [basis(2, 0), (basis(2, 0) + basis(2, 1)) / sqrt(2)]
+ω_values = [0.2, 1.0]
+γ_values = [0.1, 0.3, 0.9]
+
+sols = mcsolve_map(H_sweep, initial_states, range(0, 2, 21), c_sweep;
+    params = (ω_values, γ_values),
+    e_ops = (sigmap() * sigmam(),),
+    ntraj = 64,
+    progress_bar = Val(false),
+)
+
+size(sols) # (2, 2, 3)
+```
+
+`sols[i, j, k]` is a [`TimeEvolutionMCSol`](@ref) for `initial_states[i]`,
+`ω_values[j]`, and `γ_values[k]`. A single initial state keeps a leading dimension
+of length one. Without a parameter sweep, the result is a vector of solutions.
+
+By default, `keep_runs_results = Val(false)` accumulates expectation values and
+density matrices after each batch, releasing individual trajectory outputs.
+Set `keep_runs_results = Val(true)` to retain individual trajectories with the
+same indexing as [`mcsolve`](@ref). Jump histories are retained in both modes.
+The `batch_size` keyword controls how many trajectory outputs are held before
+reduction; the default is `1024`. Smaller batches reduce working memory but add
+scheduling overhead. Progress is updated after each batch.
+
+For a fixed sweep grid and identically initialized `rng`, increasing `ntraj`
+preserves the random streams of earlier trajectories at every sweep point.
+Hamiltonian and collapse-operator coefficients may depend on the swept
+parameters, while dimensions and operator structure must remain fixed.

@@ -224,7 +224,7 @@ function _mcsolve_initialize_callbacks(cb::CallbackSet, tlist, traj_rng)
 
     if _mcsolve_has_continuous_jump(cb)
         idx = 1
-        if cb_discrete[idx].affect!.func isa SaveFuncMCSolve
+        if length(cb_discrete) >= idx && cb_discrete[idx].affect! isa FunctionCallingAffect && cb_discrete[idx].affect!.func isa SaveFuncMCSolve
             e_ops = cb_discrete[idx].affect!.func.e_ops
             expvals = similar(cb_discrete[idx].affect!.func.expvals)
             _save_func = SaveFuncMCSolve(e_ops, Ref(1), expvals)
@@ -236,10 +236,11 @@ function _mcsolve_initialize_callbacks(cb::CallbackSet, tlist, traj_rng)
         _jump_affect! = _similar_affect!(cb_continuous[1].affect!, traj_rng)
         cb_jump = _modify_field(cb_continuous[1], :affect!, _jump_affect!)
 
-        return CallbackSet((cb_jump, cb_continuous[2:end]...), (cb_save..., cb_discrete[2:end]...))
+        first_custom = isempty(cb_save) ? 1 : 2
+        return CallbackSet((cb_jump, cb_continuous[2:end]...), (cb_save..., cb_discrete[first_custom:end]...))
     else
         idx = 2
-        if cb_discrete[idx].affect!.func isa SaveFuncMCSolve
+        if length(cb_discrete) >= idx && cb_discrete[idx].affect! isa FunctionCallingAffect && cb_discrete[idx].affect!.func isa SaveFuncMCSolve
             e_ops = cb_discrete[idx].affect!.func.e_ops
             expvals = similar(cb_discrete[idx].affect!.func.expvals)
             _save_func = SaveFuncMCSolve(e_ops, Ref(1), expvals)
@@ -251,7 +252,8 @@ function _mcsolve_initialize_callbacks(cb::CallbackSet, tlist, traj_rng)
         _jump_affect! = _similar_affect!(cb_discrete[1].affect!, traj_rng)
         cb_jump = _modify_field(cb_discrete[1], :affect!, _jump_affect!)
 
-        return CallbackSet(cb_continuous, (cb_jump, cb_save..., cb_discrete[3:end]...))
+        first_custom = isempty(cb_save) ? 2 : 3
+        return CallbackSet(cb_continuous, (cb_jump, cb_save..., cb_discrete[first_custom:end]...))
     end
 end
 function _mcsolve_initialize_callbacks(cb::CBT, tlist, traj_rng) where {CBT <: Union{ContinuousCallback, DiscreteCallback}}
@@ -273,7 +275,7 @@ function _similar_affect!(affect::LindbladJump, traj_rng)
     col_which = similar(affect.col_which)
     col_times_which_idx = Ref(1)
 
-    c_ops = map(op -> isconstant(op) ? op : deepcopy(op), affect.c_ops)
+    c_ops = map(_copy_for_trajectory, affect.c_ops)
 
     return LindbladJump(
         c_ops,

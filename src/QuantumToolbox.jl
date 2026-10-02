@@ -4,7 +4,7 @@ module QuantumToolbox
 using LinearAlgebra
 using SparseArrays
 
-import Distributed: RemoteChannel
+import Distributed: Distributed, RemoteChannel
 import Random: AbstractRNG, default_rng
 import Statistics: mean, std
 
@@ -117,6 +117,7 @@ include("time_evolution/brmesolve.jl")
 include("time_evolution/lr_mesolve.jl")
 include("time_evolution/sesolve.jl")
 include("time_evolution/mcsolve.jl")
+include("time_evolution/mcsolve_map.jl")
 include("time_evolution/ssesolve.jl")
 include("time_evolution/smesolve.jl")
 include("time_evolution/liouvillian_dressed_nonsecular.jl")

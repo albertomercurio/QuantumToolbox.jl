@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased](https://github.com/qutip/QuantumToolbox.jl/tree/main)
 
+- Add `mcsolve_map` for Cartesian sweeps over initial states and parameters using one SciML ensemble for all trajectories. Results are averaged between batches by default, with support for retaining individual trajectories and for serial, threaded, distributed, and split-threaded execution.
+- Preserve user callbacks when resetting Monte Carlo trajectories without expectation operators, and isolate mutable caches of constant composed collapse operators between trajectories.
 
 
 ## [v0.50.0]
