@@ -38,6 +38,7 @@ Space
 TensorSpace
 LiouvilleSpace
 SumSpace
+SumDims
 EnrSpace
 enr_state_dictionaries
 ```
@@ -135,6 +136,7 @@ vec2mat
 mat2vec
 direct_sum
 direct_component
+set_direct_component
 ```
 
 ### [Generate states and operators](@id doc-API:Generate-states-and-operators)

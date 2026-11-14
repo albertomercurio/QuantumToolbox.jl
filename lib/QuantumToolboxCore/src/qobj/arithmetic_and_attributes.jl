@@ -597,6 +597,12 @@ ptrace(QO::QuantumObject{Bra, <:Dimensions{Space, Space}}, sel::AbstractVecOrTup
 
 ptrace(QO::QuantumObject, sel::Int) = ptrace(QO, SVector(sel))
 
+# helper for direct_sum not supported error
+const _SumQobj = Union{QuantumObject{<:Union{Ket, Operator}, <:Dimensions{<:SumSpace}}, QuantumObject{Bra, <:Dimensions{Space, <:SumSpace}}}
+_sum_space_error(f::String) = throw(ArgumentError("$f is not supported for direct sums (SumSpace)."))
+
+ptrace(::_SumQobj, ::AbstractVecOrTuple{<:Integer}) = _sum_space_error("ptrace")
+
 function _ptrace_ket(QO::AbstractArray, dims::Union{SVector, MVector}, sel)
     n_d = length(dims)
 
@@ -798,6 +804,8 @@ function _dims_and_perm(::Operator, dimensions::Dimensions{<:TensorSpace{Nq}, <:
     return reverse(vcat(dimensions_to_dims(dimensions.from), dimensions_to_dims(dimensions.to))), reverse((2 * L + 1) .- vcat(order, order .+ L))
 end
 _dims_and_perm(type::Union{Ket, Bra, Operator}, dimensions::Dimensions, ::AbstractVector{Int}, ::Int) = throw(ArgumentError("permute does not support for $(type) with dims = $(_get_dims_string(dimensions))"))
+
+SparseArrays.permute(::_SumQobj, ::AbstractVecOrTuple{<:Integer}) = _sum_space_error("permute")
 
 _order_dimensions(::Ket, dimensions::Dimensions, order::SVector{N, Int}) where {N} =
     Dimensions(dimensions.to[order], dimensions.from)  # from should be Space(1), keep as is

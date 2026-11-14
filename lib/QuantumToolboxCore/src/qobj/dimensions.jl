@@ -7,7 +7,7 @@ This file defines the Dimensions structure and also the following space structur
 =#
 
 export Dimensions, get_size
-export AbstractSpace, Space, TensorSpace, SumSpace
+export AbstractSpace, Space, TensorSpace, SumSpace, SumDims
 export AbstractSuperSpace, LiouvilleSpace
 
 @doc raw"""
@@ -162,6 +162,7 @@ _get_dims_string(dimensions::Dimensions) = "($(_space_string(dimensions.to)), $(
 _get_dims_string(::Nothing) = "nothing" # for EigsolveResult.dimensions = nothing
 
 Base.:(==)(dim1::Dimensions, dim2::Dimensions) = (dim1.to == dim2.to) && (dim1.from == dim2.from)
+Base.hash(dim::Dimensions, h::UInt) = hash(dim.to, hash(dim.from, h)) # equal dimensions must have equal hashes
 
 ##########################################
 # Space
@@ -211,6 +212,8 @@ struct TensorSpace{N, T <: NTuple{N, AbstractSpace}} <: AbstractSpace
             throw(DomainError(N, "The number of spaces in `TensorSpace` must be larger or equal to 1."))
         elseif N == 1
             return spaces[1] # don't wrap with TensorSpace if there is only one space
+        elseif any(s -> s isa SumSpace, spaces)
+            throw(ArgumentError("`TensorSpace` cannot contain a `SumSpace`. Tensor products of direct sums are not supported."))
         else
             return new{N, T}(spaces)
         end
@@ -266,6 +269,7 @@ Base.length(::LiouvilleSpace) = 1
 
 # we somehow need to define :(==) for LiouvilleSpace, otherwise, it doesn't work with EnrSpace
 Base.:(==)(s1::LiouvilleSpace, s2::LiouvilleSpace) = s1.op_dims == s2.op_dims
+Base.hash(s::LiouvilleSpace, h::UInt) = hash(s.op_dims, h)
 
 get_size(s::LiouvilleSpace) = prod(get_size(s.op_dims)) # get_size(Dimensions.to) × get_size(Dimensions.from)
 
@@ -281,13 +285,13 @@ dimensions_to_dims(s::LiouvilleSpace) = dimensions_to_dims(s.op_dims)
 
 A structure that describes the direct sum ``\mathcal{S}_1 \oplus \mathcal{S}_2 \oplus \cdots`` of the spaces in `spaces` (a `Tuple` or an `AbstractVector`).
 
-Its dimension is the sum of the dimensions of the summands, a vector of it is the concatenation of one vector of each summand, and a matrix acting on it is a block matrix with one block for each pair of summands. Unlike [`TensorSpace`](@ref), a single summand stays a `SumSpace`, so that a block-diagonal matrix with a single block keeps the same structure.
+Its dimension is the sum of the dimensions of the summands, a vector of it is the concatenation of one vector of each summand, and a matrix acting on it is a block matrix with one block for each pair of summands. Unlike [`TensorSpace`](@ref), a single summand stays a `SumSpace`, so that a block-diagonal matrix with a single block keeps the same structure. A `SumSpace` cannot contain a [`TensorSpace`](@ref), and a [`TensorSpace`](@ref) cannot contain a `SumSpace`.
 
 A `SumSpace` is also created by [`direct_sum`](@ref) (or `⊕`) of spaces, which flattens the direct sums of direct sums. It is used by [`direct_sum`](@ref) of quantum objects and by [`block_diagonal_form`](@ref QuantumToolbox.block_diagonal_form).
 
-The summands of a `SumSpace` can also be `SumSpace`s, to group them: e.g., [`block_diagonal_form`](@ref QuantumToolbox.block_diagonal_form) groups the blocks of the density matrix that belong to the same block of a Liouvillian. Since the direct sum is associative, such a nested `SumSpace` is equal (`==`) to the flat one with the same summands, and only the indices of [`direct_component`](@ref) refer to the groups.
+The summands of a `SumSpace` can also be `SumSpace`s, to group them: e.g., [`block_diagonal_form`](@ref QuantumToolbox.block_diagonal_form) groups the blocks of the density matrix that belong to the same block of a Liouvillian. Such a nested `SumSpace` can only be built with this constructor, since [`direct_sum`](@ref) flattens. Since the direct sum is associative, a nested `SumSpace` is equal (`==`) to the flat one with the same summands, and only the indices of [`direct_component`](@ref) refer to the groups.
 
-In the `dims` of a quantum object, a `SumSpace` is printed with `⊕`. For example, `ℒ(2⊗2 ← 2⊗2) ⊕ ℒ(3 ← 3)` is the direct sum of the Liouville spaces of the operators on two qubits and on a three-level system (see [`Dimensions`](@ref)).
+In the `dims` of a quantum object, a `SumSpace` is printed with `⊕`. For example, `ℒ(2⊗2 ← 2⊗2) ⊕ ℒ(3 ← 3)` is the direct sum of the Liouville spaces of the operators on two qubits and on a three-level system (see [`Dimensions`](@ref)). Its integer form in `A.dims` is a [`SumDims`](@ref).
 
 # Examples
 
@@ -297,10 +301,20 @@ SumSpace(Space(2), Space(3))
 
 julia> get_size(S)
 5
+
+julia> length(S)
+2
 ```
 """
 struct SumSpace{T <: Union{Tuple{Vararg{AbstractSpace}}, AbstractVector{<:AbstractSpace}}} <: AbstractSpace
     spaces::T # the summands
+
+    function SumSpace(spaces::T) where {T <: Union{Tuple{Vararg{AbstractSpace}}, AbstractVector{<:AbstractSpace}}}
+        isempty(spaces) && throw(DomainError(0, "The number of spaces in `SumSpace` must be larger or equal to 1."))
+        any(s -> s isa TensorSpace, spaces) &&
+            throw(ArgumentError("`SumSpace` cannot contain a `TensorSpace`. Direct sums of tensor products are not supported."))
+        return new{T}(spaces)
+    end
 end
 SumSpace(spaces::AbstractSpace...) = SumSpace(spaces)
 
@@ -311,24 +325,76 @@ function Base.show(io::IO, s::SumSpace)
     return nothing
 end
 
+# allow iteration over the summands
+Base.iterate(s::SumSpace) = iterate(s.spaces)
+Base.iterate(s::SumSpace, state) = iterate(s.spaces, state)
+
+Base.length(s::SumSpace) = length(s.spaces)
+
 # The direct sum is associative: `(S₁ ⊕ S₂) ⊕ S₃` and `S₁ ⊕ S₂ ⊕ S₃` have the same vectors and matrices, so two direct
 # sums are equal if they have the same summands once flattened (whether they are stored in a Tuple or in a Vector).
 Base.:(==)(s1::SumSpace, s2::SumSpace) = _flat_summands(s1) == _flat_summands(s2)
+Base.hash(s::SumSpace, h::UInt) = hash(_flat_summands(s), h) # equal spaces must have equal hashes
 
 _flat_summands(s::SumSpace) = mapreduce(_flat_summands, vcat, s.spaces; init = AbstractSpace[])
 _flat_summands(s::AbstractSpace) = AbstractSpace[s]
 
 get_size(s::SumSpace) = sum(get_size, s.spaces)
 
-# the integer form of each summand
-dimensions_to_dims(s::SumSpace) = map(dimensions_to_dims, s.spaces)
-
-# the indices of the k-th summand
-function _summand_range(s::SumSpace, k::Int)
-    offset = sum(get_size, s.spaces[1:(k - 1)]; init = 0)
-    return (offset + 1):(offset + get_size(s.spaces[k]))
+# the indices of the k-th summand (or of the summands in the range k)
+function _summand_range(S::SumSpace, k::Integer)
+    (1 <= k <= length(S)) || throw(ArgumentError("Summand index $k is out of range 1:$(length(S))."))
+    offset = sum(i -> get_size(S.spaces[i]), 1:(k - 1); init = 0)
+    return (offset + 1):(offset + get_size(S.spaces[k]))
 end
-_summand_range(s::SumSpace, k::UnitRange{Int}) = first(_summand_range(s, first(k))):last(_summand_range(s, last(k)))
+function _summand_range(S::SumSpace, k::AbstractUnitRange{<:Integer})
+    isempty(k) && throw(ArgumentError("The range of summands must not be empty."))
+    return first(_summand_range(S, first(k))):last(_summand_range(S, last(k)))
+end
+
+##########################################
+# SumDims
+
+@doc raw"""
+    SumDims(summands...)
+
+The integer form of a [`SumSpace`](@ref) in `A.dims`: the dims of each summand, printed with braces. A [`Ket`](@ref) on `Space(2) ⊕ Space(3)` has `dims == (SumDims(2, 3), [1])`, printed as `({2, 3}, [1])`, so that it cannot be confused with the dims of a [`TensorSpace`](@ref) (`[2, 3]`) or of a [`LiouvilleSpace`](@ref) (`([2], [3])`). It can also be given as `dims` when creating a [`QuantumObject`](@ref), e.g. `Qobj(data; dims = SumDims(2, 3))`.
+
+# Examples
+
+```jldoctest
+julia> (basis(2, 0) ⊕ basis(3, 1)).dims
+({2, 3}, [1])
+
+julia> (basis(2, 0) ⊕ basis(3, 1)).dims == (SumDims(2, 3), [1])
+true
+```
+"""
+struct SumDims{T <: Tuple}
+    summands::T
+end
+SumDims(summands...) = SumDims(summands)
+
+Base.show(io::IO, d::SumDims) = (print(io, "{"); join(io, d.summands, ", "); print(io, "}"))
+
+# nesting is ignored, as for SumSpace
+Base.:(==)(a::SumDims, b::SumDims) = _flat_dims(a) == _flat_dims(b)
+Base.hash(d::SumDims, h::UInt) = hash(_flat_dims(d), h)
+_flat_dims(d::SumDims) = mapreduce(_flat_dims, (a, b) -> (a..., b...), d.summands)
+_flat_dims(x) = (x,)
+
+# the integer form of a SumSpace, used by `A.dims`
+dimensions_to_dims(s::SumSpace) = SumDims(Tuple(map(_summand_dims, s.spaces)))
+_summand_dims(s::Space) = s.size
+_summand_dims(s::AbstractSpace) = dimensions_to_dims(s) # a nested SumSpace gives a SumDims, a LiouvilleSpace gives ([2], [2])
+
+# the SumSpace of an integer form, to read `A.dims` back
+Dimensions(dims::SumDims) = Dimensions(_dims_space(dims))
+Dimensions(dims::Union{Tuple{SumDims, Any}, Tuple{Any, SumDims}}) = Dimensions(_dims_space(dims[1]), _dims_space(dims[2]))
+_dims_space(d::SumDims) = SumSpace(map(_dims_space, d.summands)...)
+_dims_space(n::Integer) = Space(n)
+_dims_space(v::AbstractVecOrTuple{<:Integer}) = Dimensions(v).to
+_dims_space(t::Tuple{AbstractVecOrTuple, AbstractVecOrTuple}) = LiouvilleSpace(Dimensions(t))
 
 ##########################################
 # Readable form of the spaces, used to show the `dims` of quantum objects

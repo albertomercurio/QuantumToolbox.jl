@@ -245,6 +245,10 @@ _gen_dimensions(::SuperOperatorMatrixForm, dims::AbstractSpace) = Dimensions(dim
 ## dims::DimsListType{T1, T2} : general nested array
 _gen_dimensions(::QuantumObjectType, dims::DimsListType{T1, T2}) where {T1, T2} = Dimensions(dims)
 
+## dims::SumDims, or a tuple with a SumDims (the integer form of a SumSpace, e.g. A.dims of a direct sum)
+_gen_dimensions(type::QuantumObjectType, dims::SumDims) = _gen_dimensions(type, _dims_space(dims))
+_gen_dimensions(::QuantumObjectType, dims::Union{Tuple{SumDims, Any}, Tuple{Any, SumDims}}) = Dimensions(dims)
+
 # other cases
 _gen_dimensions(::QuantumObjectType, dims::Dimensions) = dims
 _gen_dimensions(type::QuantumObjectType, dims) = throw(ArgumentError("The argument `dims` with value $dims is not valid for object type $type."))

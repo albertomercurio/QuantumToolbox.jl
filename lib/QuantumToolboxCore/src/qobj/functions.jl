@@ -277,6 +277,7 @@ julia> op.dims
 """
 function multisite_operator(dims::AbstractVecOrTuple{T}, pairs::Pair{<:Integer, <:QuantumObject{Operator}}...) where {T <: Integer}
     isempty(pairs) && throw(ArgumentError("At least one Pair of `site-index => operator` must be provided."))
+    any(p -> last(p).dimensions.to isa SumSpace, pairs) && _sum_space_error("multisite_operator")
 
     N = length(dims) # total number of sites
     sites_unsorted = [first(p) for p in pairs]

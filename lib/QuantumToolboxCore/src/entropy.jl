@@ -167,6 +167,7 @@ entropy_mutual(
     selB::Union{Int, AbstractVecOrTuple{Int}};
     kwargs...,
 ) where {N} = entropy_mutual(ket2dm(ρAB), selA, selB; kwargs...)
+entropy_mutual(::_SumQobj, selA, selB; kwargs...) = _sum_space_error("entropy_mutual")
 
 @doc raw"""
     entropy_conditional(ρAB::QuantumObject, selB; kwargs...)
@@ -186,6 +187,8 @@ entropy_conditional(
     selB::Union{Int, AbstractVecOrTuple{Int}};
     kwargs...,
 ) where {ObjType <: Union{Ket, Operator}, N} = entropy_vn(ρAB; kwargs...) - entropy_vn(ptrace(ρAB, selB); kwargs...)
+entropy_conditional(::QuantumObject{<:Union{Ket, Operator}, <:Dimensions{S, S}}, ::Union{Int, AbstractVecOrTuple{Int}}; kwargs...) where {S <: SumSpace} =
+    _sum_space_error("entropy_conditional")
 
 @doc raw"""
     entanglement(ρ::QuantumObject, sel; kwargs...)
@@ -214,6 +217,7 @@ function entanglement(
     val = entropy_vn(ρ_tr; kwargs...)
     return max(0.0, val)  # use 0.0 to make sure it always return value in Float-type
 end
+entanglement(::QuantumObject{<:Union{Ket, Operator}, <:Dimensions{<:SumSpace}}, ::Union{Int, AbstractVecOrTuple{Int}}, kwargs...) = _sum_space_error("entanglement")
 
 @doc raw"""
     concurrence(ρ::QuantumObject)
@@ -248,3 +252,4 @@ function concurrence(ρ::QuantumObject{OpType}) where {OpType <: Union{Ket, Oper
 
     return max(zero(λ[1]), λ[1] - λ[2] - λ[3] - λ[4])
 end
+concurrence(::QuantumObject{<:Union{Ket, Operator}, <:Dimensions{<:SumSpace}}) = _sum_space_error("concurrence")
