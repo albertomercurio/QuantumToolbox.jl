@@ -57,6 +57,7 @@ function negativity(ρ::QuantumObject{ObjType}, subsys::Int; logarithmic::Bool =
         return (tr_norm - 1) / 2
     end
 end
+negativity(::QuantumObject{<:Union{Ket, Operator}, <:Dimensions{<:SumSpace}}, ::Int; kwargs...) = _sum_space_error("negativity")
 
 @doc raw"""
     partial_transpose(ρ::QuantumObject, mask::Vector{Bool})
@@ -83,6 +84,7 @@ function partial_transpose(ρ::QuantumObject{Operator, <:Dimensions{<:TensorSpac
 end
 
 partial_transpose(ρ::QuantumObject{Operator, DType}, ::Vector{Bool}) where {DType} = throw(ArgumentError("Invalid partial transpose for dims = $(_get_dims_string(ρ.dimensions))"))
+partial_transpose(::QuantumObject{Operator, <:Dimensions{<:SumSpace}}, ::Vector{Bool}) = _sum_space_error("partial_transpose")
 
 # for dense matrices
 function _partial_transpose(ρ::QuantumObject{Operator}, mask::Vector{Bool})
